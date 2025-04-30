@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.13)
+cmake_minimum_required(VERSION 3.28)
 cmake_policy(VERSION 3.16)
 
 project(rlbox_lfi
@@ -98,7 +98,7 @@ endif()
 
 if (${CMAKE_SYSTEM_NAME} MATCHES "Linux")
   if (${CMAKE_HOST_SYSTEM_PROCESSOR} MATCHES "x86_64")
-    set (lfi-clang-url "https://github.com/zyedidia/lfi/releases/download/v0.7/x86_64-lfi-clang.tar.gz")
+    set (lfi-clang-url https://github.com/zyedidia/lfi/releases/download/v0.7/x86_64-lfi-clang.tar.gz)
   else()
     message(FATAL_ERROR "LFI binaries only available for x86_64.")
   endif()
