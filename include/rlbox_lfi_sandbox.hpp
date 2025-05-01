@@ -454,6 +454,7 @@ public:
     //     return nullptr;
     //   }
     // } else {
+      const uint32_t truncated = static_cast<uint32_t>(p);
       return reinterpret_cast<void*>(heap_base | p);
     // }
   }
@@ -483,8 +484,8 @@ public:
     //   }
     //   return static_cast<T_PointerType>(slot_number);
     // } else {
-      // we can assume that the heap is aligned and let integer truncation handle the conversion
-      return static_cast<uint32_t>(reinterpret_cast<uintptr_t>(p));
+      // sandbox representation of the pointer is the same as the host
+      return reinterpret_cast<T_PointerType>(p);
     // }
   }
 
@@ -502,12 +503,11 @@ public:
     //   return sandbox->template impl_get_unsandboxed_pointer<T>(p);
     // } else {
       // we can assume that the heap is aligned and grab the memory base from the example_unsandboxed_ptr
-      uintptr_t heap_base_mask =
-        std::numeric_limits<uintptr_t>::max() &
-        ~(static_cast<uintptr_t>(std::numeric_limits<T_PointerType>::max()));
-      uintptr_t computed_heap_base =
-        reinterpret_cast<uintptr_t>(example_unsandboxed_ptr) & heap_base_mask;
-      uintptr_t ret = computed_heap_base | p;
+      uintptr_t offset_mask = std::numeric_limits<uint32_t>::max();
+      uintptr_t heap_base_mask = ~offset_mask;
+      uintptr_t computed_heap_base = reinterpret_cast<uintptr_t>(example_unsandboxed_ptr) & heap_base_mask;
+      uintptr_t computed_offset = p & offset_mask;
+      uintptr_t ret = computed_heap_base | computed_offset;
       return reinterpret_cast<void*>(ret);
     // }
   }
@@ -525,17 +525,16 @@ public:
     //   auto sandbox = expensive_sandbox_finder(example_unsandboxed_ptr);
     //   return sandbox->template impl_get_sandboxed_pointer<T>(p);
     // } else {
-      // we can assume that the heap is aligned and let integer truncation handle the conversion
+      // sandbox representation of the pointer is the same as the host
       RLBOX_LFI_UNUSED(example_unsandboxed_ptr);
-      uintptr_t ret = reinterpret_cast<uintptr_t>(p);
-      return static_cast<uint32_t>(ret);
+      return reinterpret_cast<T_PointerType>(p);
     // }
   }
 
   static inline bool impl_is_in_same_sandbox(const void* p1, const void* p2)
   {
-    uintptr_t heap_base_mask = std::numeric_limits<uintptr_t>::max() &
-                               ~(std::numeric_limits<uint32_t>::max());
+    uintptr_t offset_mask = std::numeric_limits<uint32_t>::max();
+    uintptr_t heap_base_mask = ~offset_mask;
     return (reinterpret_cast<uintptr_t>(p1) & heap_base_mask) ==
            (reinterpret_cast<uintptr_t>(p2) & heap_base_mask);
   }
@@ -568,7 +567,6 @@ public:
     lfi_targetfn = (void*) func_ptr;
 
     T_Converted* trampoline = (T_Converted*) &lfi_trampoline;
-    trampoline(params...);
 
     using T_Ret = lfi_detail::return_argument<T_Converted>;
     using T_NoVoidRet = std::conditional_t<std::is_void_v<T_Ret>, uint32_t, T_Ret>;
@@ -587,9 +585,6 @@ public:
     if constexpr (!std::is_void_v<T_Ret>) {
       return ret;
     }
-
-    // TODO
-    abort();
 
 // #ifdef RLBOX_EMBEDDER_PROVIDES_TLS_STATIC_VARIABLES
 //     auto& thread_data = *get_rlbox_lfi_sandbox_thread_data();

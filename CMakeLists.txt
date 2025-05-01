@@ -194,6 +194,7 @@ add_custom_command(OUTPUT "${GLUE_LIB_ELF}"
                    COMMAND  PATH=$ENV{PATH}:${lficlang_SOURCE_DIR}/lfi-bin
                             ${lficlang_SOURCE_DIR}/bin/clang
                             -O3
+                            -static-pie
                             -o ${GLUE_LIB_ELF}
                             ${LFI_SANDBOX_WRAPPER}
                             ${rlbox_SOURCE_DIR}/code/tests/rlbox_glue/lib/libtest.c
