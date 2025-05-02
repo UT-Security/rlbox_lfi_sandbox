@@ -134,26 +134,32 @@ endif()
 
 if(DEV)
   set(LFI_BUILD_TYPE "debug")
+    set(LFI_SBX_BUILD_TYPE_FLAGS -O0)
 else()
   if ("${CMAKE_BUILD_TYPE}" STREQUAL "Debug")
     set(LFI_BUILD_TYPE "debug")
+    set(LFI_SBX_BUILD_TYPE_FLAGS -O0)
   elseif ("${CMAKE_BUILD_TYPE}" STREQUAL "RelWithDebInfo")
     set(LFI_BUILD_TYPE "debugoptimized")
+    set(LFI_SBX_BUILD_TYPE_FLAGS -O3)
   elseif ("${CMAKE_BUILD_TYPE}" STREQUAL "MinSizeRel")
     set(LFI_BUILD_TYPE "release")
+    set(LFI_SBX_BUILD_TYPE_FLAGS -O3)
   else()
     set(LFI_BUILD_TYPE "release")
+    set(LFI_SBX_BUILD_TYPE_FLAGS -O3)
   endif()
 endif()
 
 # lfi ###################
 
-set(LFI_RUNTIME_DIR "${lfi_SOURCE_DIR}/build-liblfi-${LFI_BUILD_TYPE}")
+set(LFI_RUNTIME_DIR_NAME "build-liblfi-${LFI_BUILD_TYPE}")
+set(LFI_RUNTIME_DIR "${lfi_SOURCE_DIR}/${LFI_RUNTIME_DIR_NAME}")
 set(LIBLFI_PATH ${LFI_RUNTIME_DIR}/liblfi/liblfi.a)
 
 add_custom_command(OUTPUT "${LFI_RUNTIME_DIR}"
                    WORKING_DIRECTORY "${lfi_SOURCE_DIR}"
-                   COMMAND meson setup build-liblfi-${LFI_BUILD_TYPE} -Dliblfi-only=true
+                   COMMAND meson setup ${LFI_RUNTIME_DIR_NAME} -Dliblfi-only=true --buildtype ${LFI_BUILD_TYPE}
                    COMMENT "Configuring LFI runtime")
 
 add_custom_command(OUTPUT "${LIBLFI_PATH}"
@@ -193,7 +199,7 @@ add_custom_command(OUTPUT "${GLUE_LIB_ELF}"
                    DEPENDS "${GLUE_LIB_EMBED_SRC}" ${rlbox_SOURCE_DIR}/code/tests/rlbox_glue/lib/libtest.c
                    COMMAND  PATH=$ENV{PATH}:${lficlang_SOURCE_DIR}/lfi-bin
                             ${lficlang_SOURCE_DIR}/bin/clang
-                            -O3
+                            ${LFI_SBX_BUILD_TYPE_FLAGS}
                             -static-pie
                             -o ${GLUE_LIB_ELF}
                             ${LFI_SANDBOX_WRAPPER}

@@ -31,6 +31,7 @@ lfi_trampoline:
 	// load address of the lfi_retfn function that will make the return rtcall
 	movq lfi_retfn@gottpoff(%rip), %r11
 	movq %fs:(%r11), %r11
+	andq $0xfffffffffffffff0, %rsp
 	// push this as the return address onto the user stack
 	pushq %r11
 
