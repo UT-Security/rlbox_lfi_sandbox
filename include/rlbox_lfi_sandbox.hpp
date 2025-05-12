@@ -5,9 +5,9 @@
 
 // Pull the helper header from the main repo for dynamic_check and scope_exit
 #include "rlbox_helpers.hpp"
-
 #include <cstdint>
 #include <cstring>
+#include <iostream>
 #include <limits>
 #include <map>
 #include <memory>
@@ -17,6 +17,7 @@
 #  include <shared_mutex>
 #endif
 #include <string>
+#include <tuple>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -52,6 +53,11 @@ extern "C" {
 }
 
 namespace rlbox {
+
+namespace detail {
+  // relying on the dynamic check settings (exception vs abort) in the rlbox lib
+  inline void dynamic_check(bool check, const char* const msg);
+}
 
 namespace lfi_detail {
 
@@ -191,39 +197,57 @@ public:
 
 private:
   struct TuxThread* mTuxThread {0};
-  // mutable typename RLBOX_WASM_MODULE_TYPE_CURR::instance_t lfi_instance{ 0 };
-  // struct w2c_env sandbox_memory_env{ 0 };
-  // struct w2c_wasi__snapshot__preview1 wasi_env{ 0 };
   bool instance_initialized = false;
-  // bool minwasi_init_inst_succeeded = false;
-  // // Only used if memory and tables are imported
-  // wasm_rt_memory_t local_sandbox_memory_info{ 0 };
-  // mutable wasm_rt_funcref_table_t local_sandbox_callback_table{ 0 };
-  // // Pointers to actual memory and table. This points to
-  // // local_sandbox_memory_info and local_sandbox_callback_table if the Wasm
-  // // module imports the memory and table.
-  // wasm_rt_memory_t* sandbox_memory_info{ 0 };
-  // mutable wasm_rt_funcref_table_t* sandbox_callback_table{ 0 };
   uintptr_t heap_base = 0;
   void* mLFIRetFn = 0;
   void* mLFIMallocFn = 0;
   void* mLFIFreeFn = 0;
-  // size_t return_slot_size = 0;
-  // T_PointerType return_slot = 0;
+  size_t return_slot_size = 0;
+  T_PointerType return_slot = 0;
 
-  // static const size_t MAX_CALLBACKS = 128;
-  // mutable RLBOX_SHARED_LOCK(callback_mutex);
-  // void* callback_unique_keys[MAX_CALLBACKS]{ 0 };
-  // void* callbacks[MAX_CALLBACKS]{ 0 };
-  // void* callback_lfi[MAX_CALLBACKS]{ 0 };
-  // mutable std::map<const void*, uint32_t> internal_callbacks;
+  static constexpr size_t MAX_CALLBACKS = 128;
+  mutable RLBOX_SHARED_LOCK(callback_mutex);
+  void* callback_unique_keys[MAX_CALLBACKS]{ 0 };
+  void* callbacks[MAX_CALLBACKS]{ 0 };
+  uint32_t callback_slot_assignment[MAX_CALLBACKS]{ 0 };
+  mutable std::map<const void*, uint32_t> internal_callbacks;
+  mutable std::map<uint32_t, const void*> slot_assignments;
 
 #ifndef RLBOX_EMBEDDER_PROVIDES_TLS_STATIC_VARIABLES
   thread_local static inline rlbox_lfi_sandbox_thread_data thread_data{ 0, 0 };
 #endif
 
-// template<uint32_t N, typename T_Ret, typename... T_Args>
-//   static T_Ret callback_interceptor(void* /* vmContext */, T_Args... params)
+  template<typename T_FormalRet, typename T_ActualRet>
+  inline auto serialize_to_sandbox(T_ActualRet arg)
+  {
+    if constexpr (std::is_class_v<T_FormalRet>) {
+      // structs returned as pointers into lfi memory/lfi stack
+      auto ptr = reinterpret_cast<T_FormalRet*>(
+        impl_get_unsandboxed_pointer<T_FormalRet*>(arg));
+      T_FormalRet ret = *ptr;
+      return ret;
+    } else {
+      return arg;
+    }
+  }
+
+//   template<typename T>
+//   static T callback_param(NaClSandbox_Thread* naclThreadData) {
+//     if constexpr(std::is_floating_point_v<T>) {
+//       return COMPLETELY_UNTRUSTED_CALLBACK_STACK_FLOATPARAM(naclThreadData, T);
+//     } else {
+//       return COMPLETELY_UNTRUSTED_CALLBACK_STACK_PARAM(naclThreadData, T);
+//     }
+//   }
+
+//   template<typename T>
+//   using TCallBackRetConv = std::conditional_t<std::is_same_v<float, T>, uint32_t, T>;
+
+//   template<uint32_t N, typename T_Ret, typename... T_Args>
+//   static TCallBackRetConv<T_Ret> callback_interceptor(
+//     void* /* vmContext */,
+//     rlbox_lfi_sandbox* /* curr_sbx */,
+//     uint64_t* returnBuffer)
 //   {
 // #ifdef RLBOX_EMBEDDER_PROVIDES_TLS_STATIC_VARIABLES
 //     auto& thread_data = *get_rlbox_lfi_sandbox_thread_data();
@@ -232,101 +256,107 @@ private:
 //     using T_Func = T_Ret (*)(T_Args...);
 //     T_Func func;
 //     {
-// #ifndef RLBOX_SINGLE_THREADED_INVOCATIONS
 //       RLBOX_ACQUIRE_SHARED_GUARD(lock, thread_data.sandbox->callback_mutex);
-// #endif
 //       func = reinterpret_cast<T_Func>(thread_data.sandbox->callbacks[N]);
 //     }
-//     // Callbacks are invoked through function pointers, cannot use std::forward
-//     // as we don't have caller context for T_Args, which means they are all
-//     // effectively passed by value
-//     return func(params...);
-// }
+
+//   	NaClSandbox_Thread* naclThreadData = callbackParamsBegin(thread_data.sandbox->sandbox);
+//     std::tuple<T_Args...> args { callback_param<T_Args>(naclThreadData)... };
+
+//     *returnBuffer = 0;
+//     if constexpr(std::is_void_v<T_Ret>) {
+//       std::apply(func, args);
+//     } else if constexpr(sizeof(T_Ret) <= sizeof(uint64_t)) {
+//       auto ret = std::apply(func, args);
+//       memcpy(returnBuffer, &ret, sizeof(ret));
+//       return ret;
+//     } else {
+//       return std::apply(func, args);
+//     }
+//   }
 
 //   template<uint32_t N, typename T_Ret, typename... T_Args>
 //   static void callback_interceptor_promoted(
 //     void* /* vmContext */,
-//     typename lfi_detail::convert_type_to_wasm_type<T_Ret>::type ret,
-//     typename lfi_detail::convert_type_to_wasm_type<T_Args>::type... params)
+//     rlbox_lfi_sandbox* /* curr_sbx */,
+//     uint64_t* returnBuffer)
 //   {
-// #ifdef RLBOX_EMBEDDER_PROVIDES_TLS_STATIC_VARIABLES
-//     auto& thread_data = *get_rlbox_lfi_sandbox_thread_data();
-// #endif
-//     thread_data.last_callback_invoked = N;
-//     using T_Func = T_Ret (*)(T_Args...);
-//     T_Func func;
-//     {
-// #ifndef RLBOX_SINGLE_THREADED_INVOCATIONS
-//       RLBOX_ACQUIRE_SHARED_GUARD(lock, thread_data.sandbox->callback_mutex);
-// #endif
-//       func = reinterpret_cast<T_Func>(thread_data.sandbox->callbacks[N]);
-//     }
-//     // Callbacks are invoked through function pointers, cannot use std::forward
-//     // as we don't have caller context for T_Args, which means they are all
-//     // effectively passed by value
-//     auto ret_val = func(
-//       thread_data.sandbox->template serialize_to_sandbox<T_Args>(params)...);
-//     // Copy the return value back
-//     auto ret_ptr = reinterpret_cast<T_Ret*>(
-//       thread_data.sandbox->template impl_get_unsandboxed_pointer<T_Ret*>(ret));
-//     *ret_ptr = ret_val;
+//     // Not implemented
+//     static_assert(std::is_same_v<std::void_t<T_Ret>, void>, "Class return not implemented");
+// // #ifdef RLBOX_EMBEDDER_PROVIDES_TLS_STATIC_VARIABLES
+// //     auto& thread_data = *get_rlbox_lfi_sandbox_thread_data();
+// // #endif
+
+// //     auto ret_val = callback_interceptor<N, T_Ret, T_Args...>(nullptr, nullptr, returnBuffer);
+// //     // Copy the return value back
+// //     auto ret_ptr = reinterpret_cast<T_Ret*>(
+// //       thread_data.sandbox->template impl_get_unsandboxed_pointer<T_Ret*>(*returnBuffer));
+// //     *ret_ptr = ret_val;
 //   }
 
-//   template<typename T_Ret, typename... T_Args>
-//   inline wasm_rt_func_type_t get_lfi_func_index(
-//     // dummy for template inference
-//     T_Ret (*)(T_Args...) = nullptr) const
-//   {
-//     // Class return types as promoted to args
-//     constexpr bool promoted = std::is_class_v<T_Ret>;
-//     constexpr uint32_t param_count =
-//       promoted ? (sizeof...(T_Args) + 1) : (sizeof...(T_Args));
-//     constexpr uint32_t ret_count =
-//       promoted ? 0 : (std::is_void_v<T_Ret> ? 0 : 1);
+  template<typename T_Ret, typename... T_Args>
+  static inline constexpr unsigned int get_param_count(
+    // dummy for template inference
+    T_Ret (*)(T_Args...) = nullptr)
+  {
+    // Class return types as promoted to args
+    constexpr bool promoted = std::is_class_v<T_Ret>;
+    if constexpr (promoted) {
+      return sizeof...(T_Args) + 1;
+    } else {
+      return sizeof...(T_Args);
+    }
+  }
 
-//     wasm_rt_func_type_t ret = nullptr;
-//     if constexpr (ret_count == 0) {
-//       ret = RLBOX_WASM_MODULE_TYPE_CURR::get_func_type(
-//         param_count,
-//         ret_count,
-//         lfi_detail::convert_type_to_wasm_type<T_Args>::lfi_type...);
-//     } else {
-//       ret = RLBOX_WASM_MODULE_TYPE_CURR::get_func_type(
-//         param_count,
-//         ret_count,
-//         lfi_detail::convert_type_to_wasm_type<T_Args>::lfi_type...,
-//         lfi_detail::convert_type_to_wasm_type<T_Ret>::lfi_type);
-//     }
+  void ensure_return_slot_size(size_t size)
+  {
+    if (size > return_slot_size) {
+      if (return_slot_size) {
+        impl_free_in_sandbox(return_slot);
+      }
+      return_slot = impl_malloc_in_sandbox(size);
+      detail::dynamic_check(
+        return_slot != 0,
+        "Error initializing return slot. Sandbox may be out of memory!");
+      return_slot_size = size;
+    }
+  }
 
-//     return ret;
-//   }
+template <typename T>
+inline void sandbox_handleNaClArg(NaClSandbox_Thread* naclThreadData, T arg)
+{
+  if constexpr (std::is_floating_point_v<T>) {
+    PUSH_FLOAT_TO_STACK(naclThreadData, T, arg);
+  } else {
+    PUSH_VAL_TO_STACK(naclThreadData, T, arg);
+  }
+}
 
-//   void ensure_return_slot_size(size_t size)
-//   {
-//     if (size > return_slot_size) {
-//       if (return_slot_size) {
-//         impl_free_in_sandbox(return_slot);
-//       }
-//       return_slot = impl_malloc_in_sandbox(size);
-//       detail::dynamic_check(
-//         return_slot != 0,
-//         "Error initializing return slot. Sandbox may be out of memory!");
-//       return_slot_size = size;
-//     }
-//   }
+template<typename T_Ret>
+inline void sandbox_handleNaClArgs(NaClSandbox_Thread* naclThreadData, T_Ret(*dummy_func_ptr)())
+{
+  RLBOX_LFI_UNUSED(naclThreadData);
+  RLBOX_LFI_UNUSED(dummy_func_ptr);
+}
 
-//   // function takes a 32-bit value and returns the next power of 2
-//   // return is a 64-bit value as large 32-bit values will return 2^32
-//   static inline uint64_t next_power_of_two(uint32_t value)
-//   {
-//     uint64_t power = 1;
-//     while (power < value) {
-//       power *= 2;
-//     }
-//     return power;
-//   }
+template<typename T_Ret,
+  typename T_FormalArg, typename... T_FormalArgs,
+  typename T_ActualArg, typename... T_ActualArgs>
+inline void sandbox_handleNaClArgs
+(
+  NaClSandbox_Thread* naclThreadData,
+  T_Ret(*dummy_func_ptr)(T_FormalArg, T_FormalArgs...),
+  T_ActualArg param, T_ActualArgs... params
+)
+{
+  RLBOX_LFI_UNUSED(dummy_func_ptr);
+  T_FormalArg param_conv = param;
+  sandbox_handleNaClArg(naclThreadData, param_conv);
+  sandbox_handleNaClArgs(naclThreadData, reinterpret_cast<T_Ret(*)(T_FormalArgs...)>(0), params...);
+}
 
-public:
+
+protected:
 
 #define FALLIBLE_DYNAMIC_CHECK(infallible, cond, msg)                          \
   if (infallible) {                                                            \
@@ -388,10 +418,16 @@ public:
 
     heap_base = reinterpret_cast<uintptr_t>(impl_get_memory_location());
 
-    uintptr_t heap_offset_mask = std::numeric_limits<uint32_t>::max();
-    FALLIBLE_DYNAMIC_CHECK(infallible,
-                            (heap_base & heap_offset_mask) == 0,
-                            "Sandbox heap not aligned to 4GB");
+    #if defined(__x86_64__)
+      // Check that the heap is aligned to the pointer size i.e. 32-bit pointer =>
+      // aligned to 4GB. The implementations of
+      // impl_get_unsandboxed_pointer_no_ctx and impl_get_sandboxed_pointer_no_ctx
+      // below rely on this.
+      uintptr_t heap_offset_mask = std::numeric_limits<uint32_t>::max();
+      FALLIBLE_DYNAMIC_CHECK(infallible,
+                              (heap_base & heap_offset_mask) == 0,
+                              "Sandbox heap not aligned to 4GB");
+    #endif
 
     mLFIRetFn = impl_lookup_symbol("_lfi_retfn");
     FALLIBLE_DYNAMIC_CHECK(infallible,
@@ -409,44 +445,22 @@ public:
                         mLFIFreeFn,
                         "Free not found");
 
+    // TODO: find callback slot
+
     return true;
   }
 
-#undef FALLIBLE_DYNAMIC_CHECK
-
   inline void impl_destroy_sandbox()
   {
-    // if (return_slot_size) {
-    //   impl_free_in_sandbox(return_slot);
-    // }
-
+    if (return_slot_size) {
+      impl_free_in_sandbox(return_slot);
+    }
     if (instance_initialized) {
       instance_initialized = false;
       lfi_tux_proc_free(mTuxThread);
     }
-
-    // if constexpr (is_imported_memory_and_table) {
-    //   if (sandbox_memory_info && sandbox_memory_info->data) {
-    //     destroy_lfi_memory(sandbox_memory_info);
-    //     sandbox_memory_info = nullptr;
-    //   }
-    //   if (sandbox_callback_table && sandbox_callback_table->data) {
-    //     wasm_rt_free_funcref_table(sandbox_callback_table);
-    //     sandbox_callback_table = nullptr;
-    //   }
-    // }
-
-    // if (minwasi_init_inst_succeeded) {
-    //   minwasi_init_inst_succeeded = false;
-    //   minwasi_cleanup_instance(&wasi_env);
-    // }
   }
 
-  void* impl_lookup_symbol(const char* func_name)
-  {
-    char* noconst_name = const_cast<char*>(func_name);
-    return reinterpret_cast<void*>(lfi_proc_sym(lfi_tux_ctx(mTuxThread), noconst_name));
-  }
 
   template<typename T>
   inline void* impl_get_unsandboxed_pointer(T_PointerType p) const
@@ -581,91 +595,44 @@ public:
     lfi_retfn = mLFIRetFn;
     lfi_targetfn = (void*) func_ptr;
 
-    T_Converted* trampoline = (T_Converted*) &lfi_trampoline;
-
+    //  Returned class are returned as an out parameter before the actual
+    // function parameters. Handle this.
     using T_Ret = lfi_detail::return_argument<T_Converted>;
+    if constexpr (std::is_class_v<T_Ret>) {
+      using T_Conv1 = lfi_detail::change_return_type<T_Converted, void>;
+      using T_Conv2 = lfi_detail::prepend_arg_type<T_Conv1, T_PointerType>;
+      auto func_ptr_conv =
+        reinterpret_cast<T_Conv2*>(reinterpret_cast<uintptr_t>(func_ptr));
+      ensure_return_slot_size(sizeof(T_Ret));
+      impl_invoke_with_func_ptr<T>(func_ptr_conv, return_slot, params...);
+
+      auto ptr = reinterpret_cast<T_Ret*>(
+        impl_get_unsandboxed_pointer<T_Ret*>(return_slot));
+      T_Ret ret = *ptr;
+      return ret;
+    } else {
+      constexpr auto max_param_size = (sizeof(params) + ... + 0);
+      NaClSandbox_Thread* naclThreadData = preFunctionCall(sandbox, max_param_size, 0 /* stack array size */);
+      sandbox_handleNaClArgs(naclThreadData, func_ptr, params...);
+
     using T_NoVoidRet = std::conditional_t<std::is_void_v<T_Ret>, uint32_t, T_Ret>;
 
     T_NoVoidRet ret;
 
-#define serialize_class_arg(a) a
+    // invokeFunctionCall(naclThreadData, (void*) func_ptr);
 
     if constexpr (std::is_void_v<T_Ret>) {
       RLBOX_LFI_UNUSED(ret);
-      trampoline(serialize_class_arg(params)...);
+      trampoline(params...);
     } else {
-      ret = trampoline(serialize_class_arg(params)...);
+      ret = trampoline(params...);
     }
 
     if constexpr (!std::is_void_v<T_Ret>) {
       return ret;
     }
-
-//     // Handle point 4
-//     constexpr size_t alloc_length = [&] {
-//       if constexpr (sizeof...(params) > 0) {
-//         return ((std::is_class_v<T_Args> ? 1 : 0) + ...);
-//       } else {
-//         return 0;
-//       }
-//     }();
-
-//     // 0 arg functions create 0 length arrays which is not allowed
-//     T_PointerType allocations_buff[alloc_length == 0 ? 1 : alloc_length];
-//     T_PointerType* allocations = allocations_buff;
-
-//     auto serialize_class_arg =
-//       [&](auto arg) -> std::conditional_t<std::is_class_v<decltype(arg)>,
-//                                           T_PointerType,
-//                                           decltype(arg)> {
-//       using T_Arg = decltype(arg);
-//       if constexpr (std::is_class_v<T_Arg>) {
-//         auto slot = impl_malloc_in_sandbox(sizeof(T_Arg));
-//         auto ptr =
-//           reinterpret_cast<T_Arg*>(impl_get_unsandboxed_pointer<T_Arg*>(slot));
-//         *ptr = arg;
-//         allocations[0] = slot;
-//         allocations++;
-//         return slot;
-//       } else {
-//         return arg;
-//       }
-//     };
-
-//     // 0 arg functions don't use serialize
-//     RLBOX_LFI_UNUSED(serialize_class_arg);
-
-//     using T_ConvNoClass =
-//       lfi_detail::change_class_arg_types<T_Converted, T_PointerType>;
-
-//     // Handle Point 5
-//     using T_ConvHeap = lfi_detail::prepend_arg_type<
-//       T_ConvNoClass,
-//       typename RLBOX_WASM_MODULE_TYPE_CURR::instance_t*>;
-
-//     // Function invocation
-//     auto func_ptr_conv =
-//       reinterpret_cast<T_ConvHeap*>(reinterpret_cast<uintptr_t>(func_ptr));
-
-//     using T_NoVoidRet =
-//       std::conditional_t<std::is_void_v<T_Ret>, uint32_t, T_Ret>;
-//     T_NoVoidRet ret;
-
-//     if constexpr (std::is_void_v<T_Ret>) {
-//       RLBOX_LFI_UNUSED(ret);
-//       func_ptr_conv(&lfi_instance, serialize_class_arg(params)...);
-//     } else {
-//       ret = func_ptr_conv(&lfi_instance, serialize_class_arg(params)...);
-//     }
-
-//     for (size_t i = 0; i < alloc_length; i++) {
-//       impl_free_in_sandbox(allocations_buff[i]);
-//     }
-
-//     if constexpr (!std::is_void_v<T_Ret>) {
-//       return ret;
-//     }
   }
+
 
   inline T_PointerType impl_malloc_in_sandbox(size_t size)
   {
@@ -692,12 +659,12 @@ public:
       p);
   }
 
-public:
   template<typename T_Ret, typename... T_Args>
   inline T_PointerType impl_register_callback(void* key, void* callback)
   {
     // TODO
     abort();
+
     // bool found = false;
     // uint32_t found_loc = 0;
     // void* chosen_interceptor = nullptr;
@@ -705,13 +672,20 @@ public:
     // RLBOX_ACQUIRE_UNIQUE_GUARD(lock, callback_mutex);
 
     // // need a compile time for loop as we we need I to be a compile time value
-    // // this is because we are setting the I'th callback interceptor
+    // // this is because we are setting the I'th callback ineterceptor
     // lfi_detail::compile_time_for<MAX_CALLBACKS>([&](auto I) {
     //   constexpr auto i = I.value;
     //   if (!found && callbacks[i] == nullptr) {
     //     found = true;
     //     found_loc = i;
-    //     chosen_interceptor = (void *) &callback_interceptor<i, T_Ret, T_Args...>;
+
+    //     if constexpr (std::is_class_v<T_Ret>) {
+    //       chosen_interceptor = reinterpret_cast<void*>(
+    //         callback_interceptor_promoted<i, T_Ret, T_Args...>);
+    //     } else {
+    //       chosen_interceptor =
+    //         reinterpret_cast<void*>(callback_interceptor<i, T_Ret, T_Args...>);
+    //     }
     //   }
     // });
 
@@ -720,56 +694,71 @@ public:
     //   "Could not find an empty slot in sandbox function table. This would "
     //   "happen if you have registered too many callbacks, or unsandboxed "
     //   "too many function pointers. You can file a bug if you want to "
-    //   "increase the maximum allowed callbacks or unsandboxed functions "
+    //   "increase the maximum allowed callbacks or unsadnboxed functions "
     //   "pointers");
 
-    // void* lfi_func_addr = lfi_register_cb(chosen_interceptor);
+    // uintptr_t result = 0;
+
+    // if constexpr(std::is_same_v<double, T_Ret>){
+    //   constexpr int doubleCallbackSlot = MAX_CALLBACKS - 2;
+    //   detail::dynamic_check(callbacks[doubleCallbackSlot] == nullptr, "double callback slot already in use");
+    //   chosen_interceptor = reinterpret_cast<void*>(callback_interceptor<doubleCallbackSlot, T_Ret, T_Args...>);
+    //   found_loc = doubleCallbackSlot;
+    //   result = registerSandboxDoubleCallbackWithState(sandbox, found_loc, (uintptr_t) chosen_interceptor, this);
+    // } else if constexpr(std::is_same_v<float, T_Ret>){
+    //   constexpr int floatCallbackSlot = MAX_CALLBACKS - 1;
+    //   detail::dynamic_check(callbacks[floatCallbackSlot] == nullptr, "Float callback slot already in use");
+    //   chosen_interceptor = reinterpret_cast<void*>(callback_interceptor<floatCallbackSlot, T_Ret, T_Args...>);
+    //   found_loc = floatCallbackSlot;
+    //   result = registerSandboxFloatCallbackWithState(sandbox, found_loc, (uintptr_t) chosen_interceptor, this);
+    // } else {
+    //   result = registerSandboxCallbackWithState(sandbox, found_loc, (uintptr_t) chosen_interceptor, this);
+    // }
+
     // callback_unique_keys[found_loc] = key;
     // callbacks[found_loc] = callback;
-    // callback_lfi[found_loc] = lfi_func_addr;
+    // callback_slot_assignment[found_loc] = result;
+    // slot_assignments[result] = callback;
 
-    // return reinterpret_cast<T_PointerType>(lfi_func_addr);
+    // return static_cast<T_PointerType>(result);
   }
 
   static inline std::pair<rlbox_lfi_sandbox*, void*>
   impl_get_executed_callback_sandbox_and_key()
   {
-    // TODO
-    abort();
-// #ifdef RLBOX_EMBEDDER_PROVIDES_TLS_STATIC_VARIABLES
-//     auto& thread_data = *get_rlbox_lfi_sandbox_thread_data();
-// #endif
-//     auto sandbox = thread_data.sandbox;
-//     auto callback_num = thread_data.last_callback_invoked;
-//     void* key = sandbox->callback_unique_keys[callback_num];
-//     return std::make_pair(sandbox, key);
+#ifdef RLBOX_EMBEDDER_PROVIDES_TLS_STATIC_VARIABLES
+    auto& thread_data = *get_rlbox_lfi_sandbox_thread_data();
+#endif
+    auto sandbox = thread_data.sandbox;
+    auto callback_num = thread_data.last_callback_invoked;
+    void* key = sandbox->callback_unique_keys[callback_num];
+    return std::make_pair(sandbox, key);
   }
 
   template<typename T_Ret, typename... T_Args>
   inline void impl_unregister_callback(void* key)
   {
-    // TODO
-    abort();
-    // bool found = false;
-    // {
-    //   RLBOX_ACQUIRE_UNIQUE_GUARD(lock, callback_mutex);
-    //   for (uint32_t i = 0; i < MAX_CALLBACKS; i++) {
-    //     if (callback_unique_keys[i] == key) {
-    //       void* lfi_func_addr = callback_lfi[i];
-    //       lfi_unregister_cb(lfi_func_addr);
+    bool found = false;
+    uint32_t i = 0;
+    {
+      RLBOX_ACQUIRE_UNIQUE_GUARD(lock, callback_mutex);
+      for (; i < MAX_CALLBACKS; i++) {
+        if (callback_unique_keys[i] == key) {
+          unregisterSandboxCallback(sandbox, i);
+          callback_unique_keys[i] = nullptr;
+          callbacks[i] = nullptr;
+          callback_slot_assignment[i] = 0;
+          found = true;
+          break;
+        }
+      }
+    }
 
-    //       callback_unique_keys[i] = nullptr;
-    //       callbacks[i] = nullptr;
-    //       callback_lfi[i] = nullptr;
-    //       found = true;
-    //       break;
-    //     }
-    //   }
-    // }
+    detail::dynamic_check(
+      found, "Internal error: Could not find callback to unregister");
 
-    // detail::dynamic_check(
-    //   found, "Internal error: Could not find callback to unregister");
+    return;
   }
 };
 
-}; // namespace rlbox
+} // namespace rlbox
