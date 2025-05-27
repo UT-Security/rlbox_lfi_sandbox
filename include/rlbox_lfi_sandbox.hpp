@@ -1,10 +1,5 @@
 #pragma once
 
-#include "lfi.h"
-#include "lfi_tux.h"
-
-// Pull the helper header from the main repo for dynamic_check and scope_exit
-#include "rlbox_helpers.hpp"
 #include <cstdint>
 #include <cstring>
 #include <iostream>
@@ -23,6 +18,15 @@
 #include <vector>
 
 #include <unistd.h>
+
+#include "lfi_sepstack_invoker.hpp"
+
+// Pull the helper header from the main repo for dynamic_check and scope_exit
+#include "rlbox_helpers.hpp"
+
+#include "lfi.h"
+#include "lfi_tux.h"
+
 
 #define RLBOX_LFI_UNUSED(...) (void)__VA_ARGS__
 
@@ -43,7 +47,6 @@
 #endif
 
 extern "C" {
-  extern void lfi_trampoline();
   // extern bool lfi_cbinit(struct LFIContext* ctx);
   // extern void* lfi_register_cb(void* fn);
   // extern void lfi_unregister_cb(void* fn);
@@ -294,67 +297,6 @@ private:
 // //     *ret_ptr = ret_val;
 //   }
 
-  template<typename T_Ret, typename... T_Args>
-  static inline constexpr unsigned int get_param_count(
-    // dummy for template inference
-    T_Ret (*)(T_Args...) = nullptr)
-  {
-    // Class return types as promoted to args
-    constexpr bool promoted = std::is_class_v<T_Ret>;
-    if constexpr (promoted) {
-      return sizeof...(T_Args) + 1;
-    } else {
-      return sizeof...(T_Args);
-    }
-  }
-
-  void ensure_return_slot_size(size_t size)
-  {
-    if (size > return_slot_size) {
-      if (return_slot_size) {
-        impl_free_in_sandbox(return_slot);
-      }
-      return_slot = impl_malloc_in_sandbox(size);
-      detail::dynamic_check(
-        return_slot != 0,
-        "Error initializing return slot. Sandbox may be out of memory!");
-      return_slot_size = size;
-    }
-  }
-
-template <typename T>
-inline void sandbox_handleNaClArg(NaClSandbox_Thread* naclThreadData, T arg)
-{
-  if constexpr (std::is_floating_point_v<T>) {
-    PUSH_FLOAT_TO_STACK(naclThreadData, T, arg);
-  } else {
-    PUSH_VAL_TO_STACK(naclThreadData, T, arg);
-  }
-}
-
-template<typename T_Ret>
-inline void sandbox_handleNaClArgs(NaClSandbox_Thread* naclThreadData, T_Ret(*dummy_func_ptr)())
-{
-  RLBOX_LFI_UNUSED(naclThreadData);
-  RLBOX_LFI_UNUSED(dummy_func_ptr);
-}
-
-template<typename T_Ret,
-  typename T_FormalArg, typename... T_FormalArgs,
-  typename T_ActualArg, typename... T_ActualArgs>
-inline void sandbox_handleNaClArgs
-(
-  NaClSandbox_Thread* naclThreadData,
-  T_Ret(*dummy_func_ptr)(T_FormalArg, T_FormalArgs...),
-  T_ActualArg param, T_ActualArgs... params
-)
-{
-  RLBOX_LFI_UNUSED(dummy_func_ptr);
-  T_FormalArg param_conv = param;
-  sandbox_handleNaClArg(naclThreadData, param_conv);
-  sandbox_handleNaClArgs(naclThreadData, reinterpret_cast<T_Ret(*)(T_FormalArgs...)>(0), params...);
-}
-
 
 protected:
 
@@ -461,6 +403,11 @@ protected:
     }
   }
 
+  void* impl_lookup_symbol(const char* func_name)
+  {
+    char* noconst_name = const_cast<char*>(func_name);
+    return reinterpret_cast<void*>(lfi_proc_sym(lfi_tux_ctx(mTuxThread), noconst_name));
+  }
 
   template<typename T>
   inline void* impl_get_unsandboxed_pointer(T_PointerType p) const
@@ -595,42 +542,45 @@ protected:
     lfi_retfn = mLFIRetFn;
     lfi_targetfn = (void*) func_ptr;
 
+    return invoke_func_on_separate_stack<T_Converted>(lfi_tux_ctx(mTuxThread), std::forward<T_Args>(params)...);
+
     //  Returned class are returned as an out parameter before the actual
     // function parameters. Handle this.
-    using T_Ret = lfi_detail::return_argument<T_Converted>;
-    if constexpr (std::is_class_v<T_Ret>) {
-      using T_Conv1 = lfi_detail::change_return_type<T_Converted, void>;
-      using T_Conv2 = lfi_detail::prepend_arg_type<T_Conv1, T_PointerType>;
-      auto func_ptr_conv =
-        reinterpret_cast<T_Conv2*>(reinterpret_cast<uintptr_t>(func_ptr));
-      ensure_return_slot_size(sizeof(T_Ret));
-      impl_invoke_with_func_ptr<T>(func_ptr_conv, return_slot, params...);
+    // using T_Ret = lfi_detail::return_argument<T_Converted>;
+    // if constexpr (std::is_class_v<T_Ret>) {
+    //   using T_Conv1 = lfi_detail::change_return_type<T_Converted, void>;
+    //   using T_Conv2 = lfi_detail::prepend_arg_type<T_Conv1, T_PointerType>;
+    //   auto func_ptr_conv =
+    //     reinterpret_cast<T_Conv2*>(reinterpret_cast<uintptr_t>(func_ptr));
+    //   ensure_return_slot_size(sizeof(T_Ret));
+    //   impl_invoke_with_func_ptr<T>(func_ptr_conv, return_slot, params...);
 
-      auto ptr = reinterpret_cast<T_Ret*>(
-        impl_get_unsandboxed_pointer<T_Ret*>(return_slot));
-      T_Ret ret = *ptr;
-      return ret;
-    } else {
-      constexpr auto max_param_size = (sizeof(params) + ... + 0);
-      NaClSandbox_Thread* naclThreadData = preFunctionCall(sandbox, max_param_size, 0 /* stack array size */);
-      sandbox_handleNaClArgs(naclThreadData, func_ptr, params...);
+    //   auto ptr = reinterpret_cast<T_Ret*>(
+    //     impl_get_unsandboxed_pointer<T_Ret*>(return_slot));
+    //   T_Ret ret = *ptr;
+    //   return ret;
+    // } else {
+    //   constexpr auto max_param_size = (sizeof(params) + ... + 0);
+    //   NaClSandbox_Thread* naclThreadData = preFunctionCall(sandbox, max_param_size, 0 /* stack array size */);
+    //   sandbox_handleNaClArgs(naclThreadData, func_ptr, params...);
 
-    using T_NoVoidRet = std::conditional_t<std::is_void_v<T_Ret>, uint32_t, T_Ret>;
+    //   using T_NoVoidRet = std::conditional_t<std::is_void_v<T_Ret>, uint32_t, T_Ret>;
 
-    T_NoVoidRet ret;
+    //   T_NoVoidRet ret;
 
-    // invokeFunctionCall(naclThreadData, (void*) func_ptr);
+    //   // invokeFunctionCall(naclThreadData, (void*) func_ptr);
 
-    if constexpr (std::is_void_v<T_Ret>) {
-      RLBOX_LFI_UNUSED(ret);
-      trampoline(params...);
-    } else {
-      ret = trampoline(params...);
-    }
+    //   if constexpr (std::is_void_v<T_Ret>) {
+    //     RLBOX_LFI_UNUSED(ret);
+    //     trampoline(params...);
+    //   } else {
+    //     ret = trampoline(params...);
+    //   }
 
-    if constexpr (!std::is_void_v<T_Ret>) {
-      return ret;
-    }
+    //   if constexpr (!std::is_void_v<T_Ret>) {
+    //     return ret;
+    //   }
+    // }
   }
 
 
@@ -738,26 +688,27 @@ protected:
   template<typename T_Ret, typename... T_Args>
   inline void impl_unregister_callback(void* key)
   {
-    bool found = false;
-    uint32_t i = 0;
-    {
-      RLBOX_ACQUIRE_UNIQUE_GUARD(lock, callback_mutex);
-      for (; i < MAX_CALLBACKS; i++) {
-        if (callback_unique_keys[i] == key) {
-          unregisterSandboxCallback(sandbox, i);
-          callback_unique_keys[i] = nullptr;
-          callbacks[i] = nullptr;
-          callback_slot_assignment[i] = 0;
-          found = true;
-          break;
-        }
-      }
-    }
+    abort();
+    // bool found = false;
+    // uint32_t i = 0;
+    // {
+    //   RLBOX_ACQUIRE_UNIQUE_GUARD(lock, callback_mutex);
+    //   for (; i < MAX_CALLBACKS; i++) {
+    //     if (callback_unique_keys[i] == key) {
+    //       unregisterSandboxCallback(sandbox, i);
+    //       callback_unique_keys[i] = nullptr;
+    //       callbacks[i] = nullptr;
+    //       callback_slot_assignment[i] = 0;
+    //       found = true;
+    //       break;
+    //     }
+    //   }
+    // }
 
-    detail::dynamic_check(
-      found, "Internal error: Could not find callback to unregister");
+    // detail::dynamic_check(
+    //   found, "Internal error: Could not find callback to unregister");
 
-    return;
+    // return;
   }
 };
 

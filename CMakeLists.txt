@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.28)
+cmake_minimum_required(VERSION 3.22)
 cmake_policy(VERSION 3.16)
 
 project(rlbox_lfi
@@ -7,7 +7,7 @@ project(rlbox_lfi
 
 # Project Settings ###################
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 enable_language(C CXX ASM)
@@ -109,7 +109,6 @@ endif()
 FetchContent_Declare(
   lficlang
   URL ${lfi-clang-url}
-  DOWNLOAD_EXTRACT_TIMESTAMP false
 )
 FetchContent_GetProperties(lficlang)
 if(NOT lficlang_POPULATED)
@@ -191,7 +190,7 @@ set_target_properties(liblfi PROPERTIES
 set(INCSTUB_FILENAME "glue_lib_lfi")
 set(GLUE_LIB_ELF "${CMAKE_BINARY_DIR}/${INCSTUB_FILENAME}")
 set(LFI_SANDBOX_WRAPPER ${CMAKE_SOURCE_DIR}/src/main.s)
-set(TRAMPOLINE_SRC "${CMAKE_SOURCE_DIR}/src/trampoline.s")
+set(TRAMPOLINE_SRC "${CMAKE_SOURCE_DIR}/src/trampoline.S")
 set(GLUE_LIB_EMBED_SRC "${CMAKE_SOURCE_DIR}/src/incstub.s")
 set(GLUE_LIB_EMBED_DEST "${CMAKE_BINARY_DIR}/incstub.s")
 
@@ -227,6 +226,7 @@ target_include_directories(test_rlbox_glue PUBLIC ${CMAKE_SOURCE_DIR}/include
                                            PUBLIC ${rlbox_SOURCE_DIR}/code/tests/rlbox_glue
                                            PUBLIC ${rlbox_SOURCE_DIR}/code/tests/rlbox_glue/lib
                                            )
+# target_compile_options(test_rlbox_glue PUBLIC -fno-stack-protector)
 target_link_libraries(test_rlbox_glue Catch2::Catch2
                                       ${CMAKE_THREAD_LIBS_INIT}
                                       ${CMAKE_DL_LIBS}
