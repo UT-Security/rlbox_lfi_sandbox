@@ -207,6 +207,8 @@ private:
   void* mLFIFreeFn = 0;
   size_t return_slot_size = 0;
   T_PointerType return_slot = 0;
+  static constexpr size_t mStackSize = 2 * 1024 * 1024;
+  uintptr_t stack_bottom = 0;
 
   static constexpr size_t MAX_CALLBACKS = 128;
   mutable RLBOX_SHARED_LOCK(callback_mutex);
@@ -335,7 +337,7 @@ protected:
 
     struct TuxOptions tuxOptions {0};
     tuxOptions.pagesize = getpagesize();
-    tuxOptions.stacksize = 2 * 1024 * 1024;
+    tuxOptions.stacksize = mStackSize;
     tuxOptions.pause_on_exit = true;
     tuxOptions.verbose = false;
     struct Tux* tux = lfi_tux_new(plat, tuxOptions);
@@ -356,9 +358,12 @@ protected:
     //   infallible, lfi_cbinit(lfi_tux_ctx(mTuxThread)), "Error initializing callback entries");
 
     lfi_tux_proc_run(mTuxThread);
+    // Reset the sandbox stack to 0 so we can correctly track its use
+    lfi_tux_ctx(mTuxThread)->regs.rsp = 0;
     instance_initialized = true;
 
     heap_base = reinterpret_cast<uintptr_t>(impl_get_memory_location());
+    stack_bottom = lfi_tux_proc_stack(mTuxThread) + mStackSize;
 
     #if defined(__x86_64__)
       // Check that the heap is aligned to the pointer size i.e. 32-bit pointer =>
@@ -542,7 +547,7 @@ protected:
     lfi_retfn = mLFIRetFn;
     lfi_targetfn = (void*) func_ptr;
 
-    return invoke_func_on_separate_stack<T_Converted>(lfi_tux_ctx(mTuxThread), std::forward<T_Args>(params)...);
+    return invoke_func_on_separate_stack<T_Converted>(lfi_tux_ctx(mTuxThread), stack_bottom, std::forward<T_Args>(params)...);
 
     //  Returned class are returned as an out parameter before the actual
     // function parameters. Handle this.

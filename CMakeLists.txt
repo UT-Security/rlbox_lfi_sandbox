@@ -90,7 +90,8 @@ list(APPEND CMAKE_MODULE_PATH "${catch2_SOURCE_DIR}/contrib")
 
 FetchContent_Declare(
   lfi
-  GIT_REPOSITORY https://github.com/zyedidia/lfi.git)
+  GIT_REPOSITORY https://github.com/zyedidia/lfi.git
+  GIT_TAG update-lfi-ret)
 FetchContent_GetProperties(lfi)
 if(NOT lfi_POPULATED)
   FetchContent_Populate(lfi)
@@ -136,8 +137,10 @@ if(DEV)
     set(LFI_SBX_BUILD_TYPE_FLAGS -O0)
 else()
   if ("${CMAKE_BUILD_TYPE}" STREQUAL "Debug")
-    set(LFI_BUILD_TYPE "debug")
-    set(LFI_SBX_BUILD_TYPE_FLAGS -O0)
+    # set(LFI_BUILD_TYPE "debug")
+    # set(LFI_SBX_BUILD_TYPE_FLAGS -O0)
+    set(LFI_BUILD_TYPE "release")
+    set(LFI_SBX_BUILD_TYPE_FLAGS -O3)
   elseif ("${CMAKE_BUILD_TYPE}" STREQUAL "RelWithDebInfo")
     set(LFI_BUILD_TYPE "debugoptimized")
     set(LFI_SBX_BUILD_TYPE_FLAGS -O3)

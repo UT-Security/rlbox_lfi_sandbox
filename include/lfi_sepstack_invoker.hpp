@@ -492,6 +492,7 @@ using memberfuncptr_to_cfuncptr_t =
 
 template <typename TFuncPtr, typename... TActualParams>
 auto invoke_func_on_separate_stack(LFIContext* ctx,
+                                  uintptr_t sbx_stack_loc,
                                    TActualParams &&...args) {
 
   static_assert(
@@ -501,9 +502,16 @@ auto invoke_func_on_separate_stack(LFIContext* ctx,
   using TCFuncPtr =
       sepstack_invoker_detail::memberfuncptr_to_cfuncptr_t<TFuncPtr>;
 
-  void* prev_host_stack_ptr = ctx->kstackp;
-  auto restore_context = sepstack_invoker_detail::make_scope_exit(
-      [&]() { ctx->kstackp = prev_host_stack_ptr; });
+  auto prev_host_stack_ptr = ctx->kstackp;
+
+  auto prev_sbx_stack_ptr = ctx->regs.rsp;
+  ctx->regs.rsp =
+      prev_sbx_stack_ptr != 0 ? prev_sbx_stack_ptr : sbx_stack_loc;
+
+  auto restore_context = sepstack_invoker_detail::make_scope_exit([&]() {
+    ctx->kstackp = prev_host_stack_ptr;
+    ctx->regs.rsp = prev_sbx_stack_ptr;
+  });
 
   return sepstack_invoker_detail::invoke_func_on_separate_stack_helper(ctx,
       static_cast<TCFuncPtr>(0), std::forward<TActualParams>(args)...);

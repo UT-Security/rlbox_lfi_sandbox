@@ -12,10 +12,12 @@ lfi_trampoline:
 	pushq %r12
 	pushq %rbx
 	pushq %rbp
-	// dummy pushes needed by lfi
-	// TODO: eliminate
+	// one dummy push as the lfi runtime expects this
 	pushq %rbp
-	pushq %rbp
+
+	// push the trampoline return onto the host stack
+	leaq .return(%rip), %r11
+	pushq %r11
 
 	// load lfi_myctx thread-local
 	movq lfi_myctx@gottpoff(%rip), %r11
@@ -75,9 +77,18 @@ lfi_trampoline:
 
 	// jump to the sandbox function. It will return via a runtime call
 	jmpq *%r11
-	int3
-
 	// TODO: more state restoration
+.return:
+	// Undo dummy push
+	popq %rbp
+
+	popq %rbp
+	popq %rbx
+	popq %r12
+	popq %r13
+	popq %r14
+	popq %r15
+	ret
 
 .section .rodata, "a"
 /*
