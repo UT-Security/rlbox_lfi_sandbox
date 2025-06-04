@@ -19,13 +19,34 @@
 
 #include <unistd.h>
 
+#include "lfi.h"
+#include "lfi_tux.h"
+
+extern "C" {
+// TODO: eliminate these definitions
+struct ElfTable {
+    char* tab;
+    size_t size;
+};
+struct LFIContext {
+    void* kstackp;
+    uintptr_t tp;
+    struct TuxRegs regs;
+    void* ctxp;
+    struct Sys* sys;
+    struct LFIAddrSpace* as;
+
+    uintptr_t elfbase;
+    struct ElfTable symtab;
+    struct ElfTable strtab;
+};
+}
+
 #include "lfi_sepstack_invoker.hpp"
 
 // Pull the helper header from the main repo for dynamic_check and scope_exit
 #include "rlbox_helpers.hpp"
 
-#include "lfi.h"
-#include "lfi_tux.h"
 
 
 #define RLBOX_LFI_UNUSED(...) (void)__VA_ARGS__
@@ -202,6 +223,7 @@ private:
   struct TuxThread* mTuxThread {0};
   bool instance_initialized = false;
   uintptr_t heap_base = 0;
+  size_t heap_size = 0;
   void* mLFIRetFn = 0;
   void* mLFIMallocFn = 0;
   void* mLFIFreeFn = 0;
@@ -363,7 +385,13 @@ protected:
     instance_initialized = true;
 
     heap_base = reinterpret_cast<uintptr_t>(impl_get_memory_location());
-    stack_bottom = lfi_tux_proc_stack(mTuxThread) + mStackSize;
+    heap_size = impl_get_total_memory();
+    uintptr_t stack_top = lfi_tux_proc_stack(mTuxThread);
+
+    FALLIBLE_DYNAMIC_CHECK(
+      infallible, stack_top != 0, "lfi_tux_proc_stack returned null");
+
+    stack_bottom = stack_top + mStackSize;
 
     #if defined(__x86_64__)
       // Check that the heap is aligned to the pointer size i.e. 32-bit pointer =>
@@ -514,7 +542,7 @@ protected:
 
   inline bool impl_is_pointer_in_sandbox_memory(const void* p)
   {
-    size_t length = impl_get_total_memory();
+    size_t length = heap_size;
     uintptr_t p_val = reinterpret_cast<uintptr_t>(p);
     return p_val >= heap_base && p_val < (heap_base + length);
   }
@@ -525,7 +553,7 @@ protected:
   }
 
   inline size_t impl_get_total_memory() {
-    return static_cast<uint64_t>(1) << 32;
+    return lfi_as_info(lfi_ctx_as(lfi_tux_ctx(mTuxThread))).size;
   }
 
   inline void* impl_get_memory_location() const
@@ -547,7 +575,7 @@ protected:
     lfi_retfn = mLFIRetFn;
     lfi_targetfn = (void*) func_ptr;
 
-    return invoke_func_on_separate_stack<T_Converted>(lfi_tux_ctx(mTuxThread), stack_bottom, std::forward<T_Args>(params)...);
+    return invoke_func_on_separate_stack<T_Converted>(lfi_tux_ctx(mTuxThread), heap_base, heap_base + heap_size, stack_bottom, std::forward<T_Args>(params)...);
   }
 
 
