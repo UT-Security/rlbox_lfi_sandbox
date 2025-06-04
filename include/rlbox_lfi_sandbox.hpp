@@ -21,6 +21,7 @@
 
 #include "lfi.h"
 #include "lfi_tux.h"
+#include "lfi_callback.h"
 
 extern "C" {
 // TODO: eliminate these definitions
@@ -233,30 +234,33 @@ private:
   uintptr_t stack_bottom = 0;
 
   static constexpr size_t MAX_CALLBACKS = 128;
+  static_assert(MAX_CALLBACKS <= LFI_MAXCALLBACKS);
+
   mutable RLBOX_SHARED_LOCK(callback_mutex);
   void* callback_unique_keys[MAX_CALLBACKS]{ 0 };
   void* callbacks[MAX_CALLBACKS]{ 0 };
-  uint32_t callback_slot_assignment[MAX_CALLBACKS]{ 0 };
+  void* callback_slot_assignment[MAX_CALLBACKS]{ 0 };
+  void* callback_interceptor_assignment[MAX_CALLBACKS]{ 0 };
   mutable std::map<const void*, uint32_t> internal_callbacks;
-  mutable std::map<uint32_t, const void*> slot_assignments;
+  mutable std::map<void*, const void*> slot_assignments;
 
 #ifndef RLBOX_EMBEDDER_PROVIDES_TLS_STATIC_VARIABLES
   thread_local static inline rlbox_lfi_sandbox_thread_data thread_data{ 0, 0 };
 #endif
 
-  template<typename T_FormalRet, typename T_ActualRet>
-  inline auto serialize_to_sandbox(T_ActualRet arg)
-  {
-    if constexpr (std::is_class_v<T_FormalRet>) {
-      // structs returned as pointers into lfi memory/lfi stack
-      auto ptr = reinterpret_cast<T_FormalRet*>(
-        impl_get_unsandboxed_pointer<T_FormalRet*>(arg));
-      T_FormalRet ret = *ptr;
-      return ret;
-    } else {
-      return arg;
-    }
-  }
+  // template<typename T_FormalRet, typename T_ActualRet>
+  // inline auto serialize_to_sandbox(T_ActualRet arg)
+  // {
+  //   if constexpr (std::is_class_v<T_FormalRet>) {
+  //     // structs returned as pointers into lfi memory/lfi stack
+  //     auto ptr = reinterpret_cast<T_FormalRet*>(
+  //       impl_get_unsandboxed_pointer<T_FormalRet*>(arg));
+  //     T_FormalRet ret = *ptr;
+  //     return ret;
+  //   } else {
+  //     return arg;
+  //   }
+  // }
 
 //   template<typename T>
 //   static T callback_param(NaClSandbox_Thread* naclThreadData) {
@@ -321,6 +325,40 @@ private:
 // //     *ret_ptr = ret_val;
 //   }
 
+template<uint32_t N, typename T_Ret, typename... T_Args>
+static void callback_interceptor()
+{
+#ifdef RLBOX_EMBEDDER_PROVIDES_TLS_STATIC_VARIABLES
+  auto& thread_data = *get_rlbox_lfi_sandbox_thread_data();
+#endif
+  thread_data.last_callback_invoked = N;
+  using T_Func = T_Ret (*)(T_Args...);
+  T_Func func;
+  {
+    RLBOX_ACQUIRE_SHARED_GUARD(lock, thread_data.sandbox->callback_mutex);
+    func = reinterpret_cast<T_Func>(thread_data.sandbox->callbacks[N]);
+  }
+
+  invoke_callback_from_separate_stack(lfi_tux_ctx(thread_data.sandbox->mTuxThread),
+    thread_data.sandbox->heap_base,
+    thread_data.sandbox->heap_base + thread_data.sandbox->heap_size,
+    func
+  );
+
+  // NaClSandbox_Thread* naclThreadData = callbackParamsBegin(thread_data.sandbox->sandbox);
+  // std::tuple<T_Args...> args { callback_param<T_Args>(naclThreadData)... };
+
+  // *returnBuffer = 0;
+  // if constexpr(std::is_void_v<T_Ret>) {
+  //   std::apply(func, args);
+  // } else if constexpr(sizeof(T_Ret) <= sizeof(uint64_t)) {
+  //   auto ret = std::apply(func, args);
+  //   memcpy(returnBuffer, &ret, sizeof(ret));
+  //   return ret;
+  // } else {
+  //   return std::apply(func, args);
+  // }
+}
 
 protected:
 
@@ -420,7 +458,7 @@ protected:
                         mLFIFreeFn,
                         "Free not found");
 
-    // TODO: find callback slot
+    lfi_cbinit(lfi_tux_ctx(mTuxThread));
 
     return true;
   }
@@ -607,40 +645,43 @@ protected:
   template<typename T_Ret, typename... T_Args>
   inline T_PointerType impl_register_callback(void* key, void* callback)
   {
-    // TODO
-    abort();
+    // // TODO
+    // abort();
 
-    // bool found = false;
-    // uint32_t found_loc = 0;
-    // void* chosen_interceptor = nullptr;
+    bool found = false;
+    uint32_t found_loc = 0;
+    void* chosen_interceptor = nullptr;
 
-    // RLBOX_ACQUIRE_UNIQUE_GUARD(lock, callback_mutex);
+    RLBOX_ACQUIRE_UNIQUE_GUARD(lock, callback_mutex);
 
-    // // need a compile time for loop as we we need I to be a compile time value
-    // // this is because we are setting the I'th callback ineterceptor
-    // lfi_detail::compile_time_for<MAX_CALLBACKS>([&](auto I) {
-    //   constexpr auto i = I.value;
-    //   if (!found && callbacks[i] == nullptr) {
-    //     found = true;
-    //     found_loc = i;
+    // need a compile time for loop as we we need I to be a compile time value
+    // this is because we are setting the I'th callback interceptor
+    lfi_detail::compile_time_for<MAX_CALLBACKS>([&](auto I) {
+      constexpr auto i = I.value;
+      if (!found && callbacks[i] == nullptr) {
+        found = true;
+        found_loc = i;
 
-    //     if constexpr (std::is_class_v<T_Ret>) {
-    //       chosen_interceptor = reinterpret_cast<void*>(
-    //         callback_interceptor_promoted<i, T_Ret, T_Args...>);
-    //     } else {
-    //       chosen_interceptor =
-    //         reinterpret_cast<void*>(callback_interceptor<i, T_Ret, T_Args...>);
-    //     }
-    //   }
-    // });
+        // if constexpr (std::is_class_v<T_Ret>) {
+        //   chosen_interceptor = reinterpret_cast<void*>(
+        //     callback_interceptor_promoted<i, T_Ret, T_Args...>);
+        // } else {
+          chosen_interceptor =
+            reinterpret_cast<void*>(callback_interceptor<i, T_Ret, T_Args...>);
+        // }
+      }
+    });
 
-    // detail::dynamic_check(
-    //   found,
-    //   "Could not find an empty slot in sandbox function table. This would "
-    //   "happen if you have registered too many callbacks, or unsandboxed "
-    //   "too many function pointers. You can file a bug if you want to "
-    //   "increase the maximum allowed callbacks or unsadnboxed functions "
-    //   "pointers");
+    detail::dynamic_check(
+      found,
+      "Could not find an empty slot in sandbox function table. This would "
+      "happen if you have registered too many callbacks, or unsandboxed "
+      "too many function pointers. You can file a bug if you want to "
+      "increase the maximum allowed callbacks or unsandboxed functions "
+      "pointers");
+
+    void* result = lfi_register_cb(chosen_interceptor);
+
 
     // uintptr_t result = 0;
 
@@ -660,12 +701,13 @@ protected:
     //   result = registerSandboxCallbackWithState(sandbox, found_loc, (uintptr_t) chosen_interceptor, this);
     // }
 
-    // callback_unique_keys[found_loc] = key;
-    // callbacks[found_loc] = callback;
-    // callback_slot_assignment[found_loc] = result;
-    // slot_assignments[result] = callback;
+    callback_unique_keys[found_loc] = key;
+    callbacks[found_loc] = callback;
+    callback_slot_assignment[found_loc] = result;
+    callback_interceptor_assignment[found_loc] = chosen_interceptor;
+    slot_assignments[result] = callback;
 
-    // return static_cast<T_PointerType>(result);
+    return reinterpret_cast<T_PointerType>(result);
   }
 
   static inline std::pair<rlbox_lfi_sandbox*, void*>
@@ -683,27 +725,28 @@ protected:
   template<typename T_Ret, typename... T_Args>
   inline void impl_unregister_callback(void* key)
   {
-    abort();
-    // bool found = false;
-    // uint32_t i = 0;
-    // {
-    //   RLBOX_ACQUIRE_UNIQUE_GUARD(lock, callback_mutex);
-    //   for (; i < MAX_CALLBACKS; i++) {
-    //     if (callback_unique_keys[i] == key) {
-    //       unregisterSandboxCallback(sandbox, i);
-    //       callback_unique_keys[i] = nullptr;
-    //       callbacks[i] = nullptr;
-    //       callback_slot_assignment[i] = 0;
-    //       found = true;
-    //       break;
-    //     }
-    //   }
-    // }
+    // abort();
+    bool found = false;
+    uint32_t i = 0;
+    {
+      RLBOX_ACQUIRE_UNIQUE_GUARD(lock, callback_mutex);
+      for (; i < MAX_CALLBACKS; i++) {
+        if (callback_unique_keys[i] == key) {
+          lfi_unregister_cb(callback_interceptor_assignment[i]);
+          callback_unique_keys[i] = nullptr;
+          callbacks[i] = nullptr;
+          slot_assignments[callback_slot_assignment[i]] = 0;
+          callback_slot_assignment[i] = 0;
+          found = true;
+          break;
+        }
+      }
+    }
 
-    // detail::dynamic_check(
-    //   found, "Internal error: Could not find callback to unregister");
+    detail::dynamic_check(
+      found, "Internal error: Could not find callback to unregister");
 
-    // return;
+    return;
   }
 };
 

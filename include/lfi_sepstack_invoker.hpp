@@ -706,11 +706,10 @@ collect_params_from_context(LFIContext *ctx, uintptr_t sbx_mem_start,
 }
 
 template <typename TRet, typename... TParams>
-auto invoke_callback_from_separate_stack_helper(LFIContext *ctx,
+void invoke_callback_from_separate_stack_helper(LFIContext *ctx,
                                                 uintptr_t sbx_mem_start,
                                                 uintptr_t sbx_mem_end,
-                                                TRet (*func_ptr)(TParams...),
-                                                uintptr_t stackloc) {
+                                                TRet (*func_ptr)(TParams...)) {
   constexpr return_info_t ret_info =
       classify_return<int_regs_available, TRet>();
 
@@ -806,14 +805,12 @@ auto invoke_func_on_separate_stack(LFIContext* ctx,
 }
 
 template <typename TFuncPtr>
-auto invoke_callback_from_separate_stack(LFIContext* ctx,
+void invoke_callback_from_separate_stack(LFIContext* ctx,
                                          uintptr_t sbx_mem_start,
                                          uintptr_t sbx_mem_end,
-                                         uintptr_t stackloc,
                                          TFuncPtr func_ptr) {
   using TCFuncPtr =
       sepstack_invoker_detail::memberfuncptr_to_cfuncptr_t<TFuncPtr>;
-  return sepstack_invoker_detail::invoke_callback_from_separate_stack_helper(
-      ctx, sbx_mem_start, sbx_mem_end, (TCFuncPtr)func_ptr,
-      stackloc);
+  sepstack_invoker_detail::invoke_callback_from_separate_stack_helper(
+      ctx, sbx_mem_start, sbx_mem_end, (TCFuncPtr)func_ptr);
 }

@@ -193,7 +193,7 @@ set_target_properties(liblfi PROPERTIES
 set(INCSTUB_FILENAME "glue_lib_lfi")
 set(GLUE_LIB_ELF "${CMAKE_BINARY_DIR}/${INCSTUB_FILENAME}")
 set(LFI_SANDBOX_WRAPPER ${CMAKE_SOURCE_DIR}/src/main.s)
-set(TRAMPOLINE_SRC "${CMAKE_SOURCE_DIR}/src/trampoline.S")
+set(LFI_RLBOX_RT_SRC "${CMAKE_SOURCE_DIR}/src/trampoline.S" "${CMAKE_SOURCE_DIR}/src/lfi_callback.c")
 set(GLUE_LIB_EMBED_SRC "${CMAKE_SOURCE_DIR}/src/incstub.s")
 set(GLUE_LIB_EMBED_DEST "${CMAKE_BINARY_DIR}/incstub.s")
 
@@ -221,7 +221,7 @@ find_package(Threads REQUIRED)
 
 add_executable(test_rlbox_glue test/test_lfi_sandbox_glue_main.cpp
                                test/test_lfi_sandbox_glue.cpp
-                               ${TRAMPOLINE_SRC}
+                               ${LFI_RLBOX_RT_SRC}
                                ${GLUE_LIB_EMBED_DEST}
                                )
 target_include_directories(test_rlbox_glue PUBLIC ${CMAKE_SOURCE_DIR}/include

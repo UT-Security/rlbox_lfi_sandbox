@@ -108,77 +108,78 @@ lfi_trampoline:
 	popq %rbx
 	ret
 
-// .global lfi_callback
-// lfi_callback:
-// 	endbr64
+.global lfi_callback
+lfi_callback:
+	// Entrypoint for callbacks. Callback target is in %r10.
+	endbr64
 
-// 	// Load context
-// 	movq lfi_myctx@gottpoff(%rip), %r11
-// 	movq %fs:(%r11), %r11
+	// Load context
+	movq lfi_myctx@gottpoff(%rip), %r11
+	movq %fs:(%r11), %r11
 
-// 	// Save params
-// 	movq %rdi  , LFI_CONTEXT_OFFSET_RDI(%r11)
-// 	movq %rsi  , LFI_CONTEXT_OFFSET_RSI(%r11)
-// 	movq %rdx  , LFI_CONTEXT_OFFSET_RDX(%r11)
-// 	movq %rcx  , LFI_CONTEXT_OFFSET_RCX(%r11)
-// 	movq %r8   , LFI_CONTEXT_OFFSET_R8(%r11)
-// 	movq %r9   , LFI_CONTEXT_OFFSET_R9(%r11)
-// 	movsd %xmm0, LFI_CONTEXT_OFFSET_XMM0(%r11)
-// 	movsd %xmm1, LFI_CONTEXT_OFFSET_XMM1(%r11)
-// 	movsd %xmm2, LFI_CONTEXT_OFFSET_XMM2(%r11)
-// 	movsd %xmm3, LFI_CONTEXT_OFFSET_XMM3(%r11)
-// 	movsd %xmm4, LFI_CONTEXT_OFFSET_XMM4(%r11)
-// 	movsd %xmm5, LFI_CONTEXT_OFFSET_XMM5(%r11)
-// 	movsd %xmm6, LFI_CONTEXT_OFFSET_XMM6(%r11)
-// 	movsd %xmm7, LFI_CONTEXT_OFFSET_XMM7(%r11)
+	// Save params
+	movq %rdi  , LFI_CONTEXT_OFFSET_RDI(%r11)
+	movq %rsi  , LFI_CONTEXT_OFFSET_RSI(%r11)
+	movq %rdx  , LFI_CONTEXT_OFFSET_RDX(%r11)
+	movq %rcx  , LFI_CONTEXT_OFFSET_RCX(%r11)
+	movq %r8   , LFI_CONTEXT_OFFSET_R8(%r11)
+	movq %r9   , LFI_CONTEXT_OFFSET_R9(%r11)
+	movsd %xmm0, LFI_CONTEXT_OFFSET_XMM0(%r11)
+	movsd %xmm1, LFI_CONTEXT_OFFSET_XMM1(%r11)
+	movsd %xmm2, LFI_CONTEXT_OFFSET_XMM2(%r11)
+	movsd %xmm3, LFI_CONTEXT_OFFSET_XMM3(%r11)
+	movsd %xmm4, LFI_CONTEXT_OFFSET_XMM4(%r11)
+	movsd %xmm5, LFI_CONTEXT_OFFSET_XMM5(%r11)
+	movsd %xmm6, LFI_CONTEXT_OFFSET_XMM6(%r11)
+	movsd %xmm7, LFI_CONTEXT_OFFSET_XMM7(%r11)
 
+	// Clear direction flag before call or return
+	cld
+	// Clear the x87, MMX, and SSE state.
+	fxrstor fxrstor_default_state(%rip)
 
-// 	// Clear direction flag before call or return
-// 	cld
-// 	// Clear the x87, MMX, and SSE state.
-// 	fxrstor fxrstor_default_state(%rip)
+	// save old rsp and load new rsp
+	// save this to context as this value is needed for nested calls
+	movq %rsp, LFI_CONTEXT_OFFSET_RSP(%r11)
+	movq LFI_CONTEXT_OFFSET_HOST_RSP(%r11), %rsp
 
-// 	// save old rsp and load new rsp
-// 	// save this to context as this value is needed for nested calls
-// 	movq %rsp, LFI_CONTEXT_OFFSET_RSP(%r11)
-// 	movq LFI_CONTEXT_OFFSET_HOST_RSP(%r11), %rsp
+	// save context which will also align the stack
+	pushq %r11
 
-// 	// save context which will also align the stack
-// 	pushq %r11
+	// invoke target function
+	callq *%r10
 
-// 	// load address of the target function and invoke
-// 	movq callback_func@gottpoff(%rip), %r11
-// 	movq %fs:(%r11), %r11
-// 	callq *%r11
+	// restore context
+	popq %r11
 
-// 	// restore context
-// 	popq %r11
+	// Zero non-callee save registers except r11 and return registers
+	xorq %rcx, %rcx
+	xorq %rsi, %rsi
+	xorq %rdi, %rdi
+	xorq %r8,  %r8
+	xorq %r9,  %r9
+	xorq %r10, %r10
 
-// 	// Zero non-callee save registers except r11 and return registers
-// 	xorq %rcx, %rcx
-// 	xorq %rsi, %rsi
-// 	xorq %rdi, %rdi
-// 	xorq %r8,  %r8
-// 	xorq %r9,  %r9
-// 	xorq %r10, %r10
+	// Clear direction flag before call or return
+	cld
+	// Clear the x87, MMX, and SSE state.
+	fxrstor fxrstor_default_state(%rip)
+	// Clear the AVX state that the "fxrstor" instruction doesn't cover.
+	vzeroupper
 
-// 	// Clear direction flag before call or return
-// 	cld
-// 	// Clear the x87, MMX, and SSE state.
-// 	fxrstor fxrstor_default_state(%rip)
-// 	// Clear the AVX state that the "fxrstor" instruction doesn't cover.
-// 	vzeroupper
+	// Load return registers
+	movq LFI_CONTEXT_OFFSET_RAX(%r11), %rax
+	movq LFI_CONTEXT_OFFSET_RDX(%r11), %rdx
+	movsd LFI_CONTEXT_OFFSET_XMM0(%r11), %xmm0
 
-// 	// Load return registers
-// 	movq LFI_CONTEXT_OFFSET_RAX(%r11), %rax
-// 	movq LFI_CONTEXT_OFFSET_RDX(%r11), %rdx
-// 	movsd LFI_CONTEXT_OFFSET_XMM0(%r11), %xmm0
+	// Restore the sandbox stack
+	movq LFI_CONTEXT_OFFSET_RSP(%r11), %rsp
 
-// 	// Restore the sandbox stack
-// 	movq LFI_CONTEXT_OFFSET_RSP(%r11), %rsp
-
-// 	// TODO: UNSAFE!
-// 	ret
+	// Do a masked return
+	popq %r11
+	andl $0xffffffe0, %r11d
+	orq %r14, %r11
+	jmpq *%r11
 
 .section .rodata, "a"
 /*
