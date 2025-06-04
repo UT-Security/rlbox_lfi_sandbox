@@ -548,44 +548,6 @@ protected:
     lfi_targetfn = (void*) func_ptr;
 
     return invoke_func_on_separate_stack<T_Converted>(lfi_tux_ctx(mTuxThread), stack_bottom, std::forward<T_Args>(params)...);
-
-    //  Returned class are returned as an out parameter before the actual
-    // function parameters. Handle this.
-    // using T_Ret = lfi_detail::return_argument<T_Converted>;
-    // if constexpr (std::is_class_v<T_Ret>) {
-    //   using T_Conv1 = lfi_detail::change_return_type<T_Converted, void>;
-    //   using T_Conv2 = lfi_detail::prepend_arg_type<T_Conv1, T_PointerType>;
-    //   auto func_ptr_conv =
-    //     reinterpret_cast<T_Conv2*>(reinterpret_cast<uintptr_t>(func_ptr));
-    //   ensure_return_slot_size(sizeof(T_Ret));
-    //   impl_invoke_with_func_ptr<T>(func_ptr_conv, return_slot, params...);
-
-    //   auto ptr = reinterpret_cast<T_Ret*>(
-    //     impl_get_unsandboxed_pointer<T_Ret*>(return_slot));
-    //   T_Ret ret = *ptr;
-    //   return ret;
-    // } else {
-    //   constexpr auto max_param_size = (sizeof(params) + ... + 0);
-    //   NaClSandbox_Thread* naclThreadData = preFunctionCall(sandbox, max_param_size, 0 /* stack array size */);
-    //   sandbox_handleNaClArgs(naclThreadData, func_ptr, params...);
-
-    //   using T_NoVoidRet = std::conditional_t<std::is_void_v<T_Ret>, uint32_t, T_Ret>;
-
-    //   T_NoVoidRet ret;
-
-    //   // invokeFunctionCall(naclThreadData, (void*) func_ptr);
-
-    //   if constexpr (std::is_void_v<T_Ret>) {
-    //     RLBOX_LFI_UNUSED(ret);
-    //     trampoline(params...);
-    //   } else {
-    //     ret = trampoline(params...);
-    //   }
-
-    //   if constexpr (!std::is_void_v<T_Ret>) {
-    //     return ret;
-    //   }
-    // }
   }
 
 
