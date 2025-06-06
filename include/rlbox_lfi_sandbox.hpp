@@ -645,9 +645,6 @@ protected:
   template<typename T_Ret, typename... T_Args>
   inline T_PointerType impl_register_callback(void* key, void* callback)
   {
-    // // TODO
-    // abort();
-
     bool found = false;
     uint32_t found_loc = 0;
     void* chosen_interceptor = nullptr;
@@ -682,25 +679,6 @@ protected:
 
     void* result = lfi_register_cb(chosen_interceptor);
 
-
-    // uintptr_t result = 0;
-
-    // if constexpr(std::is_same_v<double, T_Ret>){
-    //   constexpr int doubleCallbackSlot = MAX_CALLBACKS - 2;
-    //   detail::dynamic_check(callbacks[doubleCallbackSlot] == nullptr, "double callback slot already in use");
-    //   chosen_interceptor = reinterpret_cast<void*>(callback_interceptor<doubleCallbackSlot, T_Ret, T_Args...>);
-    //   found_loc = doubleCallbackSlot;
-    //   result = registerSandboxDoubleCallbackWithState(sandbox, found_loc, (uintptr_t) chosen_interceptor, this);
-    // } else if constexpr(std::is_same_v<float, T_Ret>){
-    //   constexpr int floatCallbackSlot = MAX_CALLBACKS - 1;
-    //   detail::dynamic_check(callbacks[floatCallbackSlot] == nullptr, "Float callback slot already in use");
-    //   chosen_interceptor = reinterpret_cast<void*>(callback_interceptor<floatCallbackSlot, T_Ret, T_Args...>);
-    //   found_loc = floatCallbackSlot;
-    //   result = registerSandboxFloatCallbackWithState(sandbox, found_loc, (uintptr_t) chosen_interceptor, this);
-    // } else {
-    //   result = registerSandboxCallbackWithState(sandbox, found_loc, (uintptr_t) chosen_interceptor, this);
-    // }
-
     callback_unique_keys[found_loc] = key;
     callbacks[found_loc] = callback;
     callback_slot_assignment[found_loc] = result;
@@ -725,7 +703,6 @@ protected:
   template<typename T_Ret, typename... T_Args>
   inline void impl_unregister_callback(void* key)
   {
-    // abort();
     bool found = false;
     uint32_t i = 0;
     {

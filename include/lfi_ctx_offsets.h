@@ -1,6 +1,6 @@
 #pragma once
 
-#if defined(__x86_64__)
+#if defined(_M_X64) || defined(__x86_64__)
 
 #define LFI_CONTEXT_OFFSET_HOST_RSP 0x0
 #define LFI_CONTEXT_OFFSET_RSP      0x10
@@ -38,7 +38,6 @@
 #define LFI_CONTEXT_OFFSET_XMM14    0x110
 #define LFI_CONTEXT_OFFSET_XMM15    0x118
 
-
 #ifdef __cplusplus
 
 #include "lfi.h"
@@ -47,7 +46,6 @@
   static_assert(offset_val == __builtin_offsetof(LFIContext, field));
 
 CHECK_FIELD_OFFSET(LFI_CONTEXT_OFFSET_HOST_RSP, kstackp);
-
 
 CHECK_FIELD_OFFSET(LFI_CONTEXT_OFFSET_RSP,   regs.rsp);
 CHECK_FIELD_OFFSET(LFI_CONTEXT_OFFSET_RAX,   regs.rax);
