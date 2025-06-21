@@ -419,7 +419,14 @@ protected:
 
     lfi_tux_proc_run(mTuxThread);
     // Reset the sandbox stack to 0 so we can correctly track its use
+#if defined(__x86_64__) || defined(_M_X64)
     lfi_tux_ctx(mTuxThread)->regs.rsp = 0;
+#elif defined(__aarch64__) || defined(_M_ARM64)
+    lfi_tux_ctx(mTuxThread)->regs.sp = 0;
+#else
+#   error "Unsupported architecture"
+#endif
+
     instance_initialized = true;
 
     heap_base = reinterpret_cast<uintptr_t>(impl_get_memory_location());
@@ -431,16 +438,14 @@ protected:
 
     stack_bottom = stack_top + mStackSize;
 
-    #if defined(__x86_64__)
-      // Check that the heap is aligned to the pointer size i.e. 32-bit pointer =>
-      // aligned to 4GB. The implementations of
-      // impl_get_unsandboxed_pointer_no_ctx and impl_get_sandboxed_pointer_no_ctx
-      // below rely on this.
-      uintptr_t heap_offset_mask = std::numeric_limits<uint32_t>::max();
-      FALLIBLE_DYNAMIC_CHECK(infallible,
-                              (heap_base & heap_offset_mask) == 0,
-                              "Sandbox heap not aligned to 4GB");
-    #endif
+    // Check that the heap is aligned to the pointer size i.e. 32-bit pointer =>
+    // aligned to 4GB. The implementations of
+    // impl_get_unsandboxed_pointer_no_ctx and impl_get_sandboxed_pointer_no_ctx
+    // below rely on this.
+    uintptr_t heap_offset_mask = std::numeric_limits<uint32_t>::max();
+    FALLIBLE_DYNAMIC_CHECK(infallible,
+                            (heap_base & heap_offset_mask) == 0,
+                            "Sandbox heap not aligned to 4GB");
 
     mLFIRetFn = impl_lookup_symbol("_lfi_retfn");
     FALLIBLE_DYNAMIC_CHECK(infallible,

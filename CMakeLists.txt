@@ -161,7 +161,7 @@ set(LIBLFI_PATH ${LFI_RUNTIME_DIR}/liblfi/liblfi.a)
 
 add_custom_command(OUTPUT "${LFI_RUNTIME_DIR}"
                    WORKING_DIRECTORY "${lfi_SOURCE_DIR}"
-                   COMMAND meson setup ${LFI_RUNTIME_DIR_NAME} -Dliblfi-only=true --buildtype ${LFI_BUILD_TYPE}
+                   COMMAND meson setup ${LFI_RUNTIME_DIR_NAME} -Dliblfi-only=true --buildtype ${LFI_BUILD_TYPE} ${CMAKE_CROSS_MESON_FILE}
                    COMMENT "Configuring LFI runtime")
 
 add_custom_command(OUTPUT "${LIBLFI_PATH}"
@@ -192,7 +192,7 @@ set_target_properties(liblfi PROPERTIES
 
 set(INCSTUB_FILENAME "glue_lib_lfi")
 set(GLUE_LIB_ELF "${CMAKE_BINARY_DIR}/${INCSTUB_FILENAME}")
-set(LFI_SANDBOX_WRAPPER ${CMAKE_SOURCE_DIR}/src/main.s)
+set(LFI_SANDBOX_WRAPPER ${CMAKE_SOURCE_DIR}/src/main.S)
 set(LFI_RLBOX_RT_SRC "${CMAKE_SOURCE_DIR}/src/trampoline.S" "${CMAKE_SOURCE_DIR}/src/lfi_callback.c")
 set(GLUE_LIB_EMBED_SRC "${CMAKE_SOURCE_DIR}/src/incstub.s")
 set(GLUE_LIB_EMBED_DEST "${CMAKE_BINARY_DIR}/incstub.s")
