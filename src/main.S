@@ -11,7 +11,7 @@ main:
 .p2align 5
 .global _lfi_retfn
 _lfi_retfn:
-	//lfi:rtcall_return
+	#lfi:rtcall_return
 
 #elif defined(__aarch64__) || defined(_M_ARM64)
 
@@ -24,7 +24,7 @@ main:
 .p2align 4
 .global _lfi_retfn
 _lfi_retfn:
-	//lfi:rtcall_return
+	#lfi:rtcall_return
 
 #else
 #error "Unknown architecture"

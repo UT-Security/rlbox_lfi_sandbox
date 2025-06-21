@@ -337,9 +337,9 @@ lfi_trampoline:
 	// Restore x0
 	mov x0, x19
 
-	// restore old stack
-	ldr x16, [x17, LFI_CONTEXT_OFFSET_HOST_SP]
-	mov sp, x16
+	// restore old stack -- already done by lfi rt
+	// ldr x16, [x17, LFI_CONTEXT_OFFSET_HOST_SP]
+	// mov sp, x16
 
 	// Save return registers
 	str  x0, [x17, LFI_CONTEXT_OFFSET_X0]
