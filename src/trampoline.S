@@ -224,6 +224,7 @@ lfi_trampoline:
 	stp x29, x30, [sp, #-16]!
 
 	// push the trampoline return onto the host stack
+	adr x30, .return
 	stp xzr, x30, [sp, #-16]!
 
 	mrs x16, tpidr_el0
@@ -253,7 +254,6 @@ lfi_trampoline:
 
 	// Clear non param registers, except the tmp reg x10, x16, x17, x30
 	mov x9, #0
-	mov x10, #0
 	mov x11, #0
 	mov x12, #0
 	mov x13, #0
@@ -271,7 +271,6 @@ lfi_trampoline:
 	mov x27, #0
 	mov x28, #0
 	mov x29, #0
-	mov x30, #0
 	movi d8, #0
 	movi d9, #0
 	movi d10, #0
