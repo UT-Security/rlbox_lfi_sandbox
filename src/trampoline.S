@@ -363,129 +363,122 @@ lfi_trampoline:
 
 .global lfi_callback
 lfi_callback:
-	.inst 0x0000dead
-	// bti jc
+	// Entrypoint for callbacks. Callback target is in x16 and is moved to x10.
+	bti jc
+	mov x10, x16
 
-	// // Save x0
-	// mov x19, x0
+	// Save x0
+	mov x9, x0
 
-	// // Load context
-	// mrs x16, tpidr_el0
-	// adrp x0, :tlsdesc:lfi_myctx
-	// ldr x17, [x0, :tlsdesc_lo12:lfi_myctx]
-	// add x0, x0, :tlsdesc_lo12:lfi_myctx
-	// .tlsdesccall lfi_myctx
-	// blr x17
-	// ldr x17, [x16, x0]
+	// Load context
+	mrs x16, tpidr_el0
+	adrp x0, :tlsdesc:lfi_myctx
+	ldr x17, [x0, :tlsdesc_lo12:lfi_myctx]
+	add x0, x0, :tlsdesc_lo12:lfi_myctx
+	.tlsdesccall lfi_myctx
+	blr x17
+	ldr x17, [x16, x0]
 
-	// // Restore x0
-	// mov x0, x19
+	// Restore x0
+	mov x0, x9
 
-	// // Save params
-	// str x0, [x17, LFI_CONTEXT_OFFSET_X0]
-	// str x1, [x17, LFI_CONTEXT_OFFSET_X1]
-	// str x2, [x17, LFI_CONTEXT_OFFSET_X2]
-	// str x3, [x17, LFI_CONTEXT_OFFSET_X3]
-	// str x4, [x17, LFI_CONTEXT_OFFSET_X4]
-	// str x5, [x17, LFI_CONTEXT_OFFSET_X5]
-	// str x6, [x17, LFI_CONTEXT_OFFSET_X6]
-	// str x7, [x17, LFI_CONTEXT_OFFSET_X7]
-	// str x8, [x17, LFI_CONTEXT_OFFSET_X8]
-	// str d0, [x17, LFI_CONTEXT_OFFSET_Q0]
-	// str d1, [x17, LFI_CONTEXT_OFFSET_Q1]
-	// str d2, [x17, LFI_CONTEXT_OFFSET_Q2]
-	// str d3, [x17, LFI_CONTEXT_OFFSET_Q3]
-	// str d4, [x17, LFI_CONTEXT_OFFSET_Q4]
-	// str d5, [x17, LFI_CONTEXT_OFFSET_Q5]
-	// str d6, [x17, LFI_CONTEXT_OFFSET_Q6]
-	// str d7, [x17, LFI_CONTEXT_OFFSET_Q7]
+	// Save params
+	str x0, [x17, LFI_CONTEXT_OFFSET_X0]
+	str x1, [x17, LFI_CONTEXT_OFFSET_X1]
+	str x2, [x17, LFI_CONTEXT_OFFSET_X2]
+	str x3, [x17, LFI_CONTEXT_OFFSET_X3]
+	str x4, [x17, LFI_CONTEXT_OFFSET_X4]
+	str x5, [x17, LFI_CONTEXT_OFFSET_X5]
+	str x6, [x17, LFI_CONTEXT_OFFSET_X6]
+	str x7, [x17, LFI_CONTEXT_OFFSET_X7]
+	str x8, [x17, LFI_CONTEXT_OFFSET_X8]
+	str d0, [x17, LFI_CONTEXT_OFFSET_Q0]
+	str d1, [x17, LFI_CONTEXT_OFFSET_Q1]
+	str d2, [x17, LFI_CONTEXT_OFFSET_Q2]
+	str d3, [x17, LFI_CONTEXT_OFFSET_Q3]
+	str d4, [x17, LFI_CONTEXT_OFFSET_Q4]
+	str d5, [x17, LFI_CONTEXT_OFFSET_Q5]
+	str d6, [x17, LFI_CONTEXT_OFFSET_Q6]
+	str d7, [x17, LFI_CONTEXT_OFFSET_Q7]
 
-	// // save old rsp and load new rsp
-	// // save this to context as this value is needed for nested calls
-	// mov x16, sp
-	// str x16, [x17, LFI_CONTEXT_OFFSET_SP]
-	// ldr x16, [x17, LFI_CONTEXT_OFFSET_HOST_SP]
-	// mov sp, x16
+	// save old rsp and load new rsp
+	// save this to context as this value is needed for nested calls
+	mov x16, sp
+	str x16, [x17, LFI_CONTEXT_OFFSET_SP]
+	ldr x16, [x17, LFI_CONTEXT_OFFSET_HOST_SP]
+	mov sp, x16
 
-	// // save context and extra reg to align the stack
-	// stp x17, x30, [sp, #-16]!
+	// save context and return reg
+	stp x17, x30, [sp, #-16]!
 
-	// // load address of the target function
-	// mrs x16, tpidr_el0
-	// adrp x0, :tlsdesc:callback_func
-	// ldr x17, [x0, :tlsdesc_lo12:callback_func]
-	// add x0, x0, :tlsdesc_lo12:callback_func
-	// .tlsdesccall callback_func
-	// blr x17
-	// ldr x17, [x16, x0]
-	// // invoke
-	// blr x17
+	// invoke target function
+	blr x10
 
-	// // restore context
-	// ldp x17, x30, [sp], 16
+	// restore context and return reg
+	ldp x17, x30, [sp], 16
 
-	// // Zero non-callee save registers except x17 and return registers
-	// mov x2, #0
-	// mov x3, #0
-	// mov x4, #0
-	// mov x5, #0
-	// mov x6, #0
-	// mov x7, #0
-	// mov x8, #0
-	// mov x9, #0
-	// mov x10, #0
-	// mov x11, #0
-	// mov x12, #0
-	// mov x13, #0
-	// mov x14, #0
-	// mov x15, #0
-	// mov x16, #0
-	// mov x18, #0
-	// mov x29, #0
-	// movi d0, #0
-	// movi d1, #0
-	// movi d2, #0
-	// movi d3, #0
-	// movi d4, #0
-	// movi d5, #0
-	// movi d6, #0
-	// movi d7, #0
-	// mov v8.d[1], xzr
-	// mov v9.d[1], xzr
-	// mov v10.d[1], xzr
-	// mov v11.d[1], xzr
-	// mov v12.d[1], xzr
-	// mov v13.d[1], xzr
-	// mov v14.d[1], xzr
-	// mov v15.d[1], xzr
-	// movi d16, #0
-	// movi d17, #0
-	// movi d18, #0
-	// movi d19, #0
-	// movi d20, #0
-	// movi d21, #0
-	// movi d22, #0
-	// movi d23, #0
-	// movi d24, #0
-	// movi d25, #0
-	// movi d26, #0
-	// movi d27, #0
-	// movi d28, #0
-	// movi d29, #0
-	// movi d30, #0
-	// movi d31, #0
+	// Zero non-callee save registers except x17 and return registers
+	mov x2, #0
+	mov x3, #0
+	mov x4, #0
+	mov x5, #0
+	mov x6, #0
+	mov x7, #0
+	mov x8, #0
+	mov x9, #0
+	mov x10, #0
+	mov x11, #0
+	mov x12, #0
+	mov x13, #0
+	mov x14, #0
+	mov x15, #0
+	mov x16, #0
+	mov x18, #0
+	mov x29, #0
+	movi d0, #0
+	movi d1, #0
+	movi d2, #0
+	movi d3, #0
+	movi d4, #0
+	movi d5, #0
+	movi d6, #0
+	movi d7, #0
+	mov v8.d[1], xzr
+	mov v9.d[1], xzr
+	mov v10.d[1], xzr
+	mov v11.d[1], xzr
+	mov v12.d[1], xzr
+	mov v13.d[1], xzr
+	mov v14.d[1], xzr
+	mov v15.d[1], xzr
+	movi d16, #0
+	movi d17, #0
+	movi d18, #0
+	movi d19, #0
+	movi d20, #0
+	movi d21, #0
+	movi d22, #0
+	movi d23, #0
+	movi d24, #0
+	movi d25, #0
+	movi d26, #0
+	movi d27, #0
+	movi d28, #0
+	movi d29, #0
+	movi d30, #0
+	movi d31, #0
 
-	// // Load return registers
-	// ldr x0, [x17, LFI_CONTEXT_OFFSET_X0]
-	// ldr x1, [x17, LFI_CONTEXT_OFFSET_X1]
-	// ldr d0, [x17, LFI_CONTEXT_OFFSET_Q0]
-	// ldr d1, [x17, LFI_CONTEXT_OFFSET_Q1]
+	// Load return registers
+	ldr x0, [x17, LFI_CONTEXT_OFFSET_X0]
+	ldr x1, [x17, LFI_CONTEXT_OFFSET_X1]
+	ldr d0, [x17, LFI_CONTEXT_OFFSET_Q0]
+	ldr d1, [x17, LFI_CONTEXT_OFFSET_Q1]
 
-	// // Restore the sandbox stack
-	// ldr x16, [x17, LFI_CONTEXT_OFFSET_SP]
-	// mov sp, x16
+	// Restore the sandbox stack
+	ldr x16, [x17, LFI_CONTEXT_OFFSET_SP]
+	mov sp, x16
 
-	// br x30
+	br x30
 
 #else
 #error "Unknown architecture"

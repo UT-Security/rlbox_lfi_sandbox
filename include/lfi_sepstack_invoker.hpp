@@ -254,6 +254,76 @@ static constexpr bool mixed_pair_structs_supported = true;
 // specified in one of the parameter registers, this value should be true, else
 // false.
 static constexpr bool returnslot_ptr_reg_consumes_parameter = true;
+// When passing a large struct as a parameter, does the ABI require the address
+// of struct on the stack to be specified (false) as a parameter or is the
+// address implicit (true).
+static constexpr bool direct_stack_references_supported = true;
+
+static uint64_t &get_param_register_ref(LFIContext *ctx, REG_TYPE type,
+                                        unsigned int reg_num) {
+  if (type == REG_TYPE::INT) {
+    if (reg_num == 0) {
+      return ctx->regs.rdi;
+    } else if (reg_num == 1) {
+      return ctx->regs.rsi;
+    } else if (reg_num == 2) {
+      return ctx->regs.rdx;
+    } else if (reg_num == 3) {
+      return ctx->regs.rcx;
+    } else if (reg_num == 4) {
+      return ctx->regs.r8;
+    } else if (reg_num == 5) {
+      return ctx->regs.r9;
+    }
+  } else if (type == REG_TYPE::FLOAT) {
+    if (reg_num == 0) {
+      return ctx->regs.xmm[0];
+    } else if (reg_num == 1) {
+      return ctx->regs.xmm[1];
+    } else if (reg_num == 2) {
+      return ctx->regs.xmm[2];
+    } else if (reg_num == 3) {
+      return ctx->regs.xmm[3];
+    } else if (reg_num == 4) {
+      return ctx->regs.xmm[4];
+    } else if (reg_num == 5) {
+      return ctx->regs.xmm[5];
+    } else if (reg_num == 6) {
+      return ctx->regs.xmm[6];
+    } else if (reg_num == 7) {
+      return ctx->regs.xmm[7];
+    }
+  }
+  abort();
+}
+
+static uint64_t &get_return_register_ref(LFIContext *ctx, REG_TYPE type,
+                                         unsigned int reg_num) {
+  if (type == REG_TYPE::INT) {
+    if (reg_num == 0) {
+      return ctx->regs.rax;
+    } else if (reg_num == 1) {
+      return ctx->regs.rdx;
+    }
+  } else if (type == REG_TYPE::FLOAT) {
+    if (reg_num == 0) {
+      return ctx->regs.xmm[0];
+    } else if (reg_num == 1) {
+      return ctx->regs.xmm[1];
+    }
+  }
+
+  abort();
+}
+
+static uint64_t &get_return_slotptr_register_ref(LFIContext *ctx) {
+  return ctx->regs.rdi;
+}
+
+static uint64_t &get_stack_register_ref(LFIContext *ctx) {
+  return ctx->regs.rsp;
+}
+
 #  elif defined(__aarch64__)
 static constexpr unsigned int int_regs_available = 8;
 static constexpr unsigned int float_regs_available = 8;
@@ -269,20 +339,95 @@ static constexpr bool mixed_pair_structs_supported = false;
 // specified in one of the parameter registers, this value should be true, else
 // false.
 static constexpr bool returnslot_ptr_reg_consumes_parameter = false;
+// When passing a large struct as a parameter, does the ABI require the address
+// of struct on the stack to be specified (false) as a parameter or is the
+// address implicit (true).
+static constexpr bool direct_stack_references_supported = false;
+
+static uint64_t &get_param_register_ref(LFIContext *ctx, REG_TYPE type,
+                                        unsigned int reg_num) {
+  if (type == REG_TYPE::INT) {
+    if (reg_num == 0) {
+      return ctx->regs.x0;
+    } else if (reg_num == 1) {
+      return ctx->regs.x1;
+    } else if (reg_num == 2) {
+      return ctx->regs.x2;
+    } else if (reg_num == 3) {
+      return ctx->regs.x3;
+    } else if (reg_num == 4) {
+      return ctx->regs.x4;
+    } else if (reg_num == 5) {
+      return ctx->regs.x5;
+    } else if (reg_num == 6) {
+      return ctx->regs.x6;
+    } else if (reg_num == 7) {
+      return ctx->regs.x7;
+    }
+  } else if (type == REG_TYPE::FLOAT) {
+    if (reg_num == 0) {
+      return ctx->regs.vector[0];
+    } else if (reg_num == 1) {
+      return ctx->regs.vector[2];
+    } else if (reg_num == 2) {
+      return ctx->regs.vector[4];
+    } else if (reg_num == 3) {
+      return ctx->regs.vector[6];
+    } else if (reg_num == 4) {
+      return ctx->regs.vector[8];
+    } else if (reg_num == 5) {
+      return ctx->regs.vector[10];
+    } else if (reg_num == 6) {
+      return ctx->regs.vector[12];
+    } else if (reg_num == 7) {
+      return ctx->regs.vector[14];
+    }
+  }
+  abort();
+}
+
+static uint64_t &get_return_register_ref(LFIContext *ctx, REG_TYPE type,
+                                         unsigned int reg_num) {
+  if (type == REG_TYPE::INT) {
+    if (reg_num == 0) {
+      return ctx->regs.x0;
+    } else if (reg_num == 1) {
+      return ctx->regs.x1;
+    }
+  } else if (type == REG_TYPE::FLOAT) {
+    if (reg_num == 0) {
+      return ctx->regs.vector[0];
+    } else if (reg_num == 1) {
+      return ctx->regs.vector[2];
+    }
+  }
+
+  abort();
+}
+
+static uint64_t &get_return_slotptr_register_ref(LFIContext *ctx) {
+  return ctx->regs.x8;
+}
+
+static uint64_t &get_stack_register_ref(LFIContext *ctx) {
+  return ctx->regs.sp;
+}
+
 #  else
 #    error "Unsupported architecture"
 #  endif
 
-#elif defined(_WIN32)
+// #elif defined(_WIN32)
 
-#  if defined(__x86_64__) || defined(_M_X64)
-static constexpr unsigned int int_regs_available = 4;
-static constexpr unsigned int float_regs_available = 4;
-static constexpr unsigned int expected_stack_alignment = 16;
-static constexpr unsigned int stack_param_offset = 8;
-#  else
-#    error "Unsupported architecture"
-#  endif
+// #  if defined(__x86_64__) || defined(_M_X64)
+// static constexpr unsigned int int_regs_available = 4;
+// static constexpr unsigned int float_regs_available = 4;
+// static constexpr unsigned int expected_stack_alignment = 16;
+// static constexpr unsigned int stack_param_offset = 8;
+// #  else
+// #    error "Unsupported architecture"
+// #  endif
+// #  error "Unsupported OS"
 
 #else
 #  error "Unsupported OS"
@@ -425,7 +570,8 @@ constexpr param_info_t<TotalParams> classify_params() {
     ret.destinations[I] = param_location_t::INT_REG2;
     return ret;
   } else if constexpr (TIntRegsLeft > 0 && std::is_class_v<TFormalParam> &&
-                       !is_trival_destr_and_copy_v<TFormalParam>) {
+                       (!direct_stack_references_supported ||
+                        !is_trival_destr_and_copy_v<TFormalParam>)) {
     auto ret = classify_params<TIntRegsLeft - 1, TFloatRegsLeft, I + 1,
                                TotalParams, TFormalParams...>();
     ret.destinations[I] = param_location_t::STACK_REFERENCE_IN_REG;
@@ -433,7 +579,8 @@ constexpr param_info_t<TotalParams> classify_params() {
         align_round_up(sizeof(TFormalParam), sizeof(uintptr_t));
     return ret;
   } else if constexpr (TIntRegsLeft == 0 && std::is_class_v<TFormalParam> &&
-                       !is_trival_destr_and_copy_v<TFormalParam>) {
+                       (!direct_stack_references_supported ||
+                        !is_trival_destr_and_copy_v<TFormalParam>)) {
     auto ret = classify_params<TIntRegsLeft, TFloatRegsLeft, I + 1, TotalParams,
                                TFormalParams...>();
     ret.destinations[I] = param_location_t::STACK_REFERENCE_IN_STACK;
@@ -449,155 +596,6 @@ constexpr param_info_t<TotalParams> classify_params() {
     return ret;
   }
 }
-
-#if defined(unix) || defined(__unix) || defined(__unix__) || defined(linux) || \
-    defined(__linux) || defined(__linux__)
-
-#  if defined(__x86_64__) || defined(_M_X64)
-
-static uint64_t &get_param_register_ref(LFIContext *ctx, REG_TYPE type,
-                                        unsigned int reg_num) {
-  if (type == REG_TYPE::INT) {
-    if (reg_num == 0) {
-      return ctx->regs.rdi;
-    } else if (reg_num == 1) {
-      return ctx->regs.rsi;
-    } else if (reg_num == 2) {
-      return ctx->regs.rdx;
-    } else if (reg_num == 3) {
-      return ctx->regs.rcx;
-    } else if (reg_num == 4) {
-      return ctx->regs.r8;
-    } else if (reg_num == 5) {
-      return ctx->regs.r9;
-    }
-  } else if (type == REG_TYPE::FLOAT) {
-    if (reg_num == 0) {
-      return ctx->regs.xmm[0];
-    } else if (reg_num == 1) {
-      return ctx->regs.xmm[1];
-    } else if (reg_num == 2) {
-      return ctx->regs.xmm[2];
-    } else if (reg_num == 3) {
-      return ctx->regs.xmm[3];
-    } else if (reg_num == 4) {
-      return ctx->regs.xmm[4];
-    } else if (reg_num == 5) {
-      return ctx->regs.xmm[5];
-    } else if (reg_num == 6) {
-      return ctx->regs.xmm[6];
-    } else if (reg_num == 7) {
-      return ctx->regs.xmm[7];
-    }
-  }
-  abort();
-}
-
-static uint64_t &get_return_register_ref(LFIContext *ctx, REG_TYPE type,
-                                         unsigned int reg_num) {
-  if (type == REG_TYPE::INT) {
-    if (reg_num == 0) {
-      return ctx->regs.rax;
-    } else if (reg_num == 1) {
-      return ctx->regs.rdx;
-    }
-  } else if (type == REG_TYPE::FLOAT) {
-    if (reg_num == 0) {
-      return ctx->regs.xmm[0];
-    } else if (reg_num == 1) {
-      return ctx->regs.xmm[1];
-    }
-  }
-
-  abort();
-}
-
-static uint64_t &get_return_slotptr_register_ref(LFIContext *ctx) {
-  return ctx->regs.rdi;
-}
-
-static uint64_t &get_stack_register_ref(LFIContext *ctx) {
-  return ctx->regs.rsp;
-}
-
-#  elif defined(__aarch64__) || defined(_M_ARM64)
-
-static uint64_t &get_param_register_ref(LFIContext *ctx, REG_TYPE type,
-                                        unsigned int reg_num) {
-  if (type == REG_TYPE::INT) {
-    if (reg_num == 0) {
-      return ctx->regs.x0;
-    } else if (reg_num == 1) {
-      return ctx->regs.x1;
-    } else if (reg_num == 2) {
-      return ctx->regs.x2;
-    } else if (reg_num == 3) {
-      return ctx->regs.x3;
-    } else if (reg_num == 4) {
-      return ctx->regs.x4;
-    } else if (reg_num == 5) {
-      return ctx->regs.x5;
-    } else if (reg_num == 6) {
-      return ctx->regs.x6;
-    } else if (reg_num == 7) {
-      return ctx->regs.x7;
-    }
-  } else if (type == REG_TYPE::FLOAT) {
-    if (reg_num == 0) {
-      return ctx->regs.vector[0];
-    } else if (reg_num == 1) {
-      return ctx->regs.vector[2];
-    } else if (reg_num == 2) {
-      return ctx->regs.vector[4];
-    } else if (reg_num == 3) {
-      return ctx->regs.vector[6];
-    } else if (reg_num == 4) {
-      return ctx->regs.vector[8];
-    } else if (reg_num == 5) {
-      return ctx->regs.vector[10];
-    } else if (reg_num == 6) {
-      return ctx->regs.vector[12];
-    } else if (reg_num == 7) {
-      return ctx->regs.vector[14];
-    }
-  }
-  abort();
-}
-
-static uint64_t &get_return_register_ref(LFIContext *ctx, REG_TYPE type,
-                                         unsigned int reg_num) {
-  if (type == REG_TYPE::INT) {
-    if (reg_num == 0) {
-      return ctx->regs.x0;
-    } else if (reg_num == 1) {
-      return ctx->regs.x1;
-    }
-  } else if (type == REG_TYPE::FLOAT) {
-    if (reg_num == 0) {
-      return ctx->regs.vector[0];
-    } else if (reg_num == 1) {
-      return ctx->regs.vector[2];
-    }
-  }
-
-  abort();
-}
-
-static uint64_t &get_return_slotptr_register_ref(LFIContext *ctx) {
-  return ctx->regs.x8;
-}
-
-static uint64_t &get_stack_register_ref(LFIContext *ctx) {
-  return ctx->regs.sp;
-}
-
-#  else
-#    error "Unsupported architecture"
-#  endif
-
-#else
-#  error "Unsupported OS"
-#endif
 
 //////////////////
 
