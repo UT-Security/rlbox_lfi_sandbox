@@ -95,116 +95,7 @@ enum class ret_location_t {
   NONE,
 };
 
-template <typename T>
-static constexpr bool is_trival_destr_and_copy_v =
-    std::is_trivially_destructible_v<T> &&
-    std::is_trivially_copy_constructible_v<T>;
-
-template <typename T>
-static constexpr bool is_class_with_trival_destr_and_copy_v =
-    std::is_class_v<T> && is_trival_destr_and_copy_v<T>;
-
-template <typename T>
-static constexpr bool is_one_reg_size = sizeof(T) <= sizeof(void *);
-template <typename T>
-static constexpr bool is_two_reg_size = sizeof(T) > sizeof(void *) &&
-                                        sizeof(T) <= 2 * sizeof(void *);
-
-//////////////////
-
-// From https://github.com/yosh-matsuda/field-reflection
-
-namespace detail {
-template <typename T, std::size_t = 0> struct any_lref {
-  template <typename U>
-    requires(!std::same_as<U, T>)
-  constexpr operator U &() const && noexcept; // NOLINT
-  template <typename U>
-    requires(!std::same_as<U, T>)
-  constexpr operator U &() const & noexcept; // NOLINT
-};
-
-template <typename T, std::size_t = 0> struct any_rref {
-  template <typename U>
-    requires(!std::same_as<U, T>)
-  constexpr operator U() const && noexcept; // NOLINT
-};
-
-template <typename T, std::size_t = 0> struct any_lref_no_base {
-  template <typename U>
-    requires(!std::is_base_of_v<U, T> && !std::same_as<U, T>)
-  constexpr operator U &() const && noexcept; // NOLINT
-  template <typename U>
-    requires(!std::is_base_of_v<U, T> && !std::same_as<U, T>)
-  constexpr operator U &() const & noexcept; // NOLINT
-};
-
-template <typename T, std::size_t = 0> struct any_rref_no_base {
-  template <typename U>
-    requires(!std::is_base_of_v<U, T> && !std::same_as<U, T>)
-  constexpr operator U() const && noexcept; // NOLINT
-};
-
-template <typename T, std::size_t ArgNum>
-concept constructible =
-    (ArgNum == 0 && requires { T{}; }) ||
-    []<std::size_t I0, std::size_t... Is>(std::index_sequence<I0, Is...>) {
-      if constexpr (std::is_copy_constructible_v<T>) {
-        return requires { T{any_lref_no_base<T, I0>(), any_lref<T, Is>()...}; };
-      } else {
-        return requires { T{any_rref_no_base<T, I0>(), any_rref<T, Is>()...}; };
-      }
-    }(std::make_index_sequence<ArgNum>());
-
-template <typename T, std::size_t N>
-  requires std::is_aggregate_v<T>
-constexpr std::size_t field_count_max3 = []() {
-  if constexpr (N >= 3) {
-    return std::numeric_limits<std::size_t>::max();
-  } else if constexpr (constructible<T, N> && !constructible<T, N + 1>) {
-    return N;
-  } else {
-    return field_count_max3<T, N + 1>;
-  }
-}();
-
-template <typename T> constexpr bool is_pair_class_impl() {
-  if constexpr (std::is_aggregate_v<T>) {
-    return detail::field_count_max3<T, 0> == 2;
-  }
-  return false;
-}
-}; // namespace detail
-
-template <typename T>
-static constexpr bool is_pair_class = detail::is_pair_class_impl<T>();
-
-namespace detail {
-template <typename T>
-auto get_pair_class_first_type() -> decltype([](T p) {
-  if constexpr (is_pair_class<T>) {
-    auto [a, b] = p;
-    return a;
-  }
-}(std::declval<T>()));
-
-template <typename T>
-auto get_pair_class_second_type() -> decltype([](T p) {
-  if constexpr (is_pair_class<T>) {
-    auto [a, b] = p;
-    return b;
-  }
-}(std::declval<T>()));
-}; // namespace detail
-
-template <typename T>
-using pair_class_first_type = decltype(detail::get_pair_class_first_type<T>());
-
-template <typename T>
-using pair_class_second_type =
-    decltype(detail::get_pair_class_second_type<T>());
-
-//////////////////
+enum class REG_TYPE { INT, FLOAT };
 
 struct return_info_t {
   unsigned int int_registers_used;
@@ -229,7 +120,18 @@ template <unsigned int TotalParams> struct param_info_t {
   std::array<param_location_t, TotalParams> destinations;
 };
 
-enum class REG_TYPE { INT, FLOAT };
+//////////////////
+
+template <typename T>
+static constexpr bool is_trival_destr_and_copy_v =
+    std::is_trivially_destructible_v<T> &&
+    std::is_trivially_copy_constructible_v<T>;
+
+template <typename T>
+static constexpr bool is_one_reg_size = sizeof(T) <= sizeof(void *);
+template <typename T>
+static constexpr bool is_two_reg_size = sizeof(T) > sizeof(void *) &&
+                                        sizeof(T) <= 2 * sizeof(void *);
 
 //////////////////
 
@@ -244,11 +146,18 @@ static constexpr unsigned int float_regs_available = 8;
 // keep things safe.
 static constexpr unsigned int expected_stack_alignment = 32;
 static constexpr unsigned int stack_param_offset = 8;
-// Do pair structs (structs with two fields) of type <uint64_t, double> when
-// passed as parameters (or return values) get treated as a uint64_t and double?
-// If yes, this is true. Else if they are treated as two uint64_t, this is
-// false.
-static constexpr bool mixed_pair_structs_supported = true;
+// Do regpassed structs (structs with fields that fit in two registers) of type
+// <uint64_t, double> when passed as parameters (or return values) get treated
+// as a uint64_t and double? If yes, this is true. Else if they are treated as
+// two uint64_t, this is false.
+static constexpr bool mixed_regpassed_structs_supported = true;
+// Do regpassed structs (structs with fields that fit in two registers) that
+// have members that cross the register_size boundary, still passed by register.
+// True is passed by register, False otherwise.
+// For example, on 64-bit platforms
+// struct foo { uint32_t a; uint64_t b; uint32_t c; }
+// __attribute__((__packed__));
+static constexpr bool regpassed_structs_misaligned_fields_supported = false;
 // When returning a large struct, the caller passes in a pointer to the memory
 // location where the callee should write the struct. If this pointer is
 // specified in one of the parameter registers, this value should be true, else
@@ -329,11 +238,18 @@ static constexpr unsigned int int_regs_available = 8;
 static constexpr unsigned int float_regs_available = 8;
 static constexpr unsigned int expected_stack_alignment = 16;
 static constexpr unsigned int stack_param_offset = 0;
-// Do pair structs (structs with two fields) of type <uint64_t, double> when
-// passed as parameters (or return values) get treated as a uint64_t and double?
-// If yes, this is true. Else if they are treated as two uint64_t, this is
-// false.
-static constexpr bool mixed_pair_structs_supported = false;
+// Do regpassed structs (structs with fields that fit in two registers) of type
+// <uint64_t, double> when passed as parameters (or return values) get treated
+// as a uint64_t and double? If yes, this is true. Else if they are treated as
+// two uint64_t, this is false.
+static constexpr bool mixed_regpassed_structs_supported = false;
+// Do regpassed structs (structs with fields that fit in two registers) that
+// have members that cross the register_size boundary, still passed by register.
+// True is passed by register, False otherwise.
+// For example, on 64-bit platforms
+// struct foo { uint32_t a; uint64_t b; uint32_t c; }
+// __attribute__((__packed__));
+static constexpr bool regpassed_structs_misaligned_fields_supported = true;
 // When returning a large struct, the caller passes in a pointer to the memory
 // location where the callee should write the struct. If this pointer is
 // specified in one of the parameter registers, this value should be true, else
@@ -433,6 +349,380 @@ static uint64_t &get_stack_register_ref(LFIContext *ctx) {
 #  error "Unsupported OS"
 #endif
 
+
+//////////////////
+
+// Adapted from https://github.com/yosh-matsuda/field-reflection
+
+template <typename T, std::size_t = 0> struct any_lref {
+  template <typename U>
+    requires(!std::same_as<U, T>)
+  constexpr operator U &() const && noexcept; // NOLINT
+  template <typename U>
+    requires(!std::same_as<U, T>)
+  constexpr operator U &() const & noexcept; // NOLINT
+};
+
+template <typename T, std::size_t = 0> struct any_rref {
+  template <typename U>
+    requires(!std::same_as<U, T>)
+  constexpr operator U() const && noexcept; // NOLINT
+};
+
+template <typename T, std::size_t = 0> struct any_lref_no_base {
+  template <typename U>
+    requires(!std::is_base_of_v<U, T> && !std::same_as<U, T>)
+  constexpr operator U &() const && noexcept; // NOLINT
+  template <typename U>
+    requires(!std::is_base_of_v<U, T> && !std::same_as<U, T>)
+  constexpr operator U &() const & noexcept; // NOLINT
+};
+
+template <typename T, std::size_t = 0> struct any_rref_no_base {
+  template <typename U>
+    requires(!std::is_base_of_v<U, T> && !std::same_as<U, T>)
+  constexpr operator U() const && noexcept; // NOLINT
+};
+
+template <typename T, std::size_t ArgNum>
+concept constructible =
+    (ArgNum == 0 && requires { T{}; }) ||
+    []<std::size_t I0, std::size_t... Is>(std::index_sequence<I0, Is...>) {
+      if constexpr (std::is_copy_constructible_v<T>) {
+        return requires { T{any_lref_no_base<T, I0>(), any_lref<T, Is>()...}; };
+      } else {
+        return requires { T{any_rref_no_base<T, I0>(), any_rref<T, Is>()...}; };
+      }
+    }(std::make_index_sequence<ArgNum>());
+
+template <typename T, std::size_t N>
+  requires std::is_aggregate_v<T>
+constexpr std::size_t field_count_max128 = []() {
+  if constexpr (N >= 128) {
+    return std::numeric_limits<std::size_t>::max();
+  } else if constexpr (constructible<T, N> && !constructible<T, N + 1>) {
+    return N;
+  } else {
+    return field_count_max128<T, N + 1>;
+  }
+}();
+
+template <class TPtr> struct struct_member_info {
+  using type = TPtr;
+};
+
+// Adapted from
+// https://www.reddit.com/r/cpp/comments/18v89ky/c20_vs_c26_basic_reflection/
+template <typename T, size_t N> constexpr auto nth_member(T &&t) {
+  /* clang-format off */
+  if constexpr (constructible<T, 0> && !constructible<T, 1>) {
+    return;
+  } else if constexpr (constructible<T, 1> && !constructible<T, 2>) {
+    auto &&[p0] = t;
+    if constexpr (N == 0) return struct_member_info<decltype(p0)>{};
+  } else if constexpr (constructible<T, 2> && !constructible<T, 3>) {
+    auto &&[p0, p1] = t;
+    if constexpr (N == 0) return struct_member_info<decltype(p0)>{};
+    else if constexpr (N == 1) return struct_member_info<decltype(p1)>{};
+  } else if constexpr (constructible<T, 3> && !constructible<T, 4>) {
+    auto &&[p0, p1, p2] = t;
+    if constexpr (N == 0) return struct_member_info<decltype(p0)>{};
+    else if constexpr (N == 1) return struct_member_info<decltype(p1)>{};
+    else if constexpr (N == 2) return struct_member_info<decltype(p2)>{};
+  } else if constexpr (constructible<T, 4> && !constructible<T, 5>) {
+    auto &&[p0, p1, p2, p3] = t;
+    if constexpr (N == 0) return struct_member_info<decltype(p0)>{};
+    else if constexpr (N == 1) return struct_member_info<decltype(p1)>{};
+    else if constexpr (N == 2) return struct_member_info<decltype(p2)>{};
+    else if constexpr (N == 3) return struct_member_info<decltype(p3)>{};
+  } else if constexpr (constructible<T, 5> && !constructible<T, 6>) {
+    auto &&[p0, p1, p2, p3, p4] = t;
+    if constexpr (N == 0) return struct_member_info<decltype(p0)>{};
+    else if constexpr (N == 1) return struct_member_info<decltype(p1)>{};
+    else if constexpr (N == 2) return struct_member_info<decltype(p2)>{};
+    else if constexpr (N == 3) return struct_member_info<decltype(p3)>{};
+    else if constexpr (N == 4) return struct_member_info<decltype(p4)>{};
+  } else if constexpr (constructible<T, 6> && !constructible<T, 7>) {
+    auto &&[p0, p1, p2, p3, p4, p5] = t;
+    if constexpr (N == 0) return struct_member_info<decltype(p0)>{};
+    else if constexpr (N == 1) return struct_member_info<decltype(p1)>{};
+    else if constexpr (N == 2) return struct_member_info<decltype(p2)>{};
+    else if constexpr (N == 3) return struct_member_info<decltype(p3)>{};
+    else if constexpr (N == 4) return struct_member_info<decltype(p4)>{};
+    else if constexpr (N == 5) return struct_member_info<decltype(p5)>{};
+  } else if constexpr (constructible<T, 7> && !constructible<T, 8>) {
+    auto &&[p0, p1, p2, p3, p4, p5, p6] = t;
+    if constexpr (N == 0) return struct_member_info<decltype(p0)>{};
+    else if constexpr (N == 1) return struct_member_info<decltype(p1)>{};
+    else if constexpr (N == 2) return struct_member_info<decltype(p2)>{};
+    else if constexpr (N == 3) return struct_member_info<decltype(p3)>{};
+    else if constexpr (N == 4) return struct_member_info<decltype(p4)>{};
+    else if constexpr (N == 5) return struct_member_info<decltype(p5)>{};
+    else if constexpr (N == 6) return struct_member_info<decltype(p6)>{};
+  } else if constexpr (constructible<T, 8> && !constructible<T, 9>) {
+    auto &&[p0, p1, p2, p3, p4, p5, p6, p7] = t;
+    if constexpr (N == 0) return struct_member_info<decltype(p0)>{};
+    else if constexpr (N == 1) return struct_member_info<decltype(p1)>{};
+    else if constexpr (N == 2) return struct_member_info<decltype(p2)>{};
+    else if constexpr (N == 3) return struct_member_info<decltype(p3)>{};
+    else if constexpr (N == 4) return struct_member_info<decltype(p4)>{};
+    else if constexpr (N == 5) return struct_member_info<decltype(p5)>{};
+    else if constexpr (N == 6) return struct_member_info<decltype(p6)>{};
+    else if constexpr (N == 7) return struct_member_info<decltype(p7)>{};
+  } else if constexpr (constructible<T, 9> && !constructible<T, 10>) {
+    auto &&[p0, p1, p2, p3, p4, p5, p6, p7, p8] = t;
+    if constexpr (N == 0) return struct_member_info<decltype(p0)>{};
+    else if constexpr (N == 1) return struct_member_info<decltype(p1)>{};
+    else if constexpr (N == 2) return struct_member_info<decltype(p2)>{};
+    else if constexpr (N == 3) return struct_member_info<decltype(p3)>{};
+    else if constexpr (N == 4) return struct_member_info<decltype(p4)>{};
+    else if constexpr (N == 5) return struct_member_info<decltype(p5)>{};
+    else if constexpr (N == 6) return struct_member_info<decltype(p6)>{};
+    else if constexpr (N == 7) return struct_member_info<decltype(p7)>{};
+    else if constexpr (N == 8) return struct_member_info<decltype(p8)>{};
+  } else if constexpr (constructible<T, 10> && !constructible<T, 11>) {
+    auto &&[p0, p1, p2, p3, p4, p5, p6, p7, p8, p9] = t;
+    if constexpr (N == 0) return struct_member_info<decltype(p0)>{};
+    else if constexpr (N == 1) return struct_member_info<decltype(p1)>{};
+    else if constexpr (N == 2) return struct_member_info<decltype(p2)>{};
+    else if constexpr (N == 3) return struct_member_info<decltype(p3)>{};
+    else if constexpr (N == 4) return struct_member_info<decltype(p4)>{};
+    else if constexpr (N == 5) return struct_member_info<decltype(p5)>{};
+    else if constexpr (N == 6) return struct_member_info<decltype(p6)>{};
+    else if constexpr (N == 7) return struct_member_info<decltype(p7)>{};
+    else if constexpr (N == 8) return struct_member_info<decltype(p8)>{};
+    else if constexpr (N == 9) return struct_member_info<decltype(p9)>{};
+  } else if constexpr (constructible<T, 11> && !constructible<T, 12>) {
+    auto &&[p0, p1, p2, p3, p4, p5, p6, p7, p8, p9, p10] = t;
+    if constexpr (N == 0) return struct_member_info<decltype(p0)>{};
+    else if constexpr (N == 1) return struct_member_info<decltype(p1)>{};
+    else if constexpr (N == 2) return struct_member_info<decltype(p2)>{};
+    else if constexpr (N == 3) return struct_member_info<decltype(p3)>{};
+    else if constexpr (N == 4) return struct_member_info<decltype(p4)>{};
+    else if constexpr (N == 5) return struct_member_info<decltype(p5)>{};
+    else if constexpr (N == 6) return struct_member_info<decltype(p6)>{};
+    else if constexpr (N == 7) return struct_member_info<decltype(p7)>{};
+    else if constexpr (N == 8) return struct_member_info<decltype(p8)>{};
+    else if constexpr (N == 9) return struct_member_info<decltype(p9)>{};
+    else if constexpr (N == 10) return struct_member_info<decltype(p10)>{};
+  } else if constexpr (constructible<T, 12> && !constructible<T, 13>) {
+    auto &&[p0, p1, p2, p3, p4, p5, p6, p7, p8, p9, p10, p11] = t;
+    if constexpr (N == 0) return struct_member_info<decltype(p0)>{};
+    else if constexpr (N == 1) return struct_member_info<decltype(p1)>{};
+    else if constexpr (N == 2) return struct_member_info<decltype(p2)>{};
+    else if constexpr (N == 3) return struct_member_info<decltype(p3)>{};
+    else if constexpr (N == 4) return struct_member_info<decltype(p4)>{};
+    else if constexpr (N == 5) return struct_member_info<decltype(p5)>{};
+    else if constexpr (N == 6) return struct_member_info<decltype(p6)>{};
+    else if constexpr (N == 7) return struct_member_info<decltype(p7)>{};
+    else if constexpr (N == 8) return struct_member_info<decltype(p8)>{};
+    else if constexpr (N == 9) return struct_member_info<decltype(p9)>{};
+    else if constexpr (N == 10) return struct_member_info<decltype(p10)>{};
+    else if constexpr (N == 11) return struct_member_info<decltype(p11)>{};
+  } else if constexpr (constructible<T, 13> && !constructible<T, 14>) {
+    auto &&[p0, p1, p2, p3, p4, p5, p6, p7, p8, p9, p10, p11, p12] = t;
+    if constexpr (N == 0) return struct_member_info<decltype(p0)>{};
+    else if constexpr (N == 1) return struct_member_info<decltype(p1)>{};
+    else if constexpr (N == 2) return struct_member_info<decltype(p2)>{};
+    else if constexpr (N == 3) return struct_member_info<decltype(p3)>{};
+    else if constexpr (N == 4) return struct_member_info<decltype(p4)>{};
+    else if constexpr (N == 5) return struct_member_info<decltype(p5)>{};
+    else if constexpr (N == 6) return struct_member_info<decltype(p6)>{};
+    else if constexpr (N == 7) return struct_member_info<decltype(p7)>{};
+    else if constexpr (N == 8) return struct_member_info<decltype(p8)>{};
+    else if constexpr (N == 9) return struct_member_info<decltype(p9)>{};
+    else if constexpr (N == 10) return struct_member_info<decltype(p10)>{};
+    else if constexpr (N == 11) return struct_member_info<decltype(p11)>{};
+    else if constexpr (N == 12) return struct_member_info<decltype(p12)>{};
+  } else if constexpr (constructible<T, 14> && !constructible<T, 15>) {
+    auto &&[p0, p1, p2, p3, p4, p5, p6, p7, p8, p9, p10, p11, p12, p13] = t;
+    if constexpr (N == 0) return struct_member_info<decltype(p0)>{};
+    else if constexpr (N == 1) return struct_member_info<decltype(p1)>{};
+    else if constexpr (N == 2) return struct_member_info<decltype(p2)>{};
+    else if constexpr (N == 3) return struct_member_info<decltype(p3)>{};
+    else if constexpr (N == 4) return struct_member_info<decltype(p4)>{};
+    else if constexpr (N == 5) return struct_member_info<decltype(p5)>{};
+    else if constexpr (N == 6) return struct_member_info<decltype(p6)>{};
+    else if constexpr (N == 7) return struct_member_info<decltype(p7)>{};
+    else if constexpr (N == 8) return struct_member_info<decltype(p8)>{};
+    else if constexpr (N == 9) return struct_member_info<decltype(p9)>{};
+    else if constexpr (N == 10) return struct_member_info<decltype(p10)>{};
+    else if constexpr (N == 11) return struct_member_info<decltype(p11)>{};
+    else if constexpr (N == 12) return struct_member_info<decltype(p12)>{};
+    else if constexpr (N == 13) return struct_member_info<decltype(p13)>{};
+  } else if constexpr (constructible<T, 15> && !constructible<T, 16>) {
+    auto &&[p0, p1, p2, p3, p4, p5, p6, p7, p8, p9, p10, p11, p12, p13, p14] = t;
+    if constexpr (N == 0) return struct_member_info<decltype(p0)>{};
+    else if constexpr (N == 1) return struct_member_info<decltype(p1)>{};
+    else if constexpr (N == 2) return struct_member_info<decltype(p2)>{};
+    else if constexpr (N == 3) return struct_member_info<decltype(p3)>{};
+    else if constexpr (N == 4) return struct_member_info<decltype(p4)>{};
+    else if constexpr (N == 5) return struct_member_info<decltype(p5)>{};
+    else if constexpr (N == 6) return struct_member_info<decltype(p6)>{};
+    else if constexpr (N == 7) return struct_member_info<decltype(p7)>{};
+    else if constexpr (N == 8) return struct_member_info<decltype(p8)>{};
+    else if constexpr (N == 9) return struct_member_info<decltype(p9)>{};
+    else if constexpr (N == 10) return struct_member_info<decltype(p10)>{};
+    else if constexpr (N == 11) return struct_member_info<decltype(p11)>{};
+    else if constexpr (N == 12) return struct_member_info<decltype(p12)>{};
+    else if constexpr (N == 13) return struct_member_info<decltype(p13)>{};
+    else if constexpr (N == 14) return struct_member_info<decltype(p14)>{};
+  } else if constexpr (constructible<T, 16> && !constructible<T, 17>) {
+    auto &&[p0, p1, p2, p3, p4, p5, p6, p7, p8, p9, p10, p11, p12, p13, p14, p15] = t;
+    if constexpr (N == 0) return struct_member_info<decltype(p0)>{};
+    else if constexpr (N == 1) return struct_member_info<decltype(p1)>{};
+    else if constexpr (N == 2) return struct_member_info<decltype(p2)>{};
+    else if constexpr (N == 3) return struct_member_info<decltype(p3)>{};
+    else if constexpr (N == 4) return struct_member_info<decltype(p4)>{};
+    else if constexpr (N == 5) return struct_member_info<decltype(p5)>{};
+    else if constexpr (N == 6) return struct_member_info<decltype(p6)>{};
+    else if constexpr (N == 7) return struct_member_info<decltype(p7)>{};
+    else if constexpr (N == 8) return struct_member_info<decltype(p8)>{};
+    else if constexpr (N == 9) return struct_member_info<decltype(p9)>{};
+    else if constexpr (N == 10) return struct_member_info<decltype(p10)>{};
+    else if constexpr (N == 11) return struct_member_info<decltype(p11)>{};
+    else if constexpr (N == 12) return struct_member_info<decltype(p12)>{};
+    else if constexpr (N == 13) return struct_member_info<decltype(p13)>{};
+    else if constexpr (N == 14) return struct_member_info<decltype(p14)>{};
+    else if constexpr (N == 15) return struct_member_info<decltype(p15)>{};
+  } else {
+    static_assert(!true_v<T>, "More fields than supported");
+  }
+  /* clang-format on */
+}
+
+template <typename T, size_t N>
+using get_field_type = decltype(nth_member<T, N>(std::declval<T>()))::type;
+
+template <typename T>
+constexpr size_t sizeof_refsupport =
+    std::is_lvalue_reference_v<T>
+        ? sizeof(std::add_pointer_t<std::remove_reference_t<T>>)
+        : sizeof(T);
+
+// Adapted from https://github.com/qlibs/reflect/tree/main
+template <size_t N, typename T>
+  requires std::is_aggregate_v<std::remove_cvref_t<T>>
+[[nodiscard]] constexpr size_t offset_of() {
+  if constexpr (N == 0) {
+    return 0;
+  } else {
+    constexpr auto offset =
+        offset_of<N - 1, T>() + sizeof_refsupport<get_field_type<T, N - 1>>;
+    constexpr auto alignment =
+        std::min(alignof(T), alignof(get_field_type<T, N>));
+    // value in range [1, alignment] to go to next aligned value
+    constexpr auto padding = alignment - (offset % alignment);
+    // value in range [0, alignment - 1] to go to next aligned value
+    constexpr auto paddingmod = padding % alignment;
+    return offset + paddingmod;
+  }
+}
+
+template <typename T, size_t N>
+constexpr size_t get_field_offset = offset_of<N, T>();
+
+template <typename T, size_t field, size_t fieldCount>
+constexpr bool is_struct_members_reg_aligned() {
+  if constexpr (field >= fieldCount) {
+    return true;
+  } else {
+    constexpr size_t field_start = get_field_offset<T, field>;
+    constexpr size_t field_end =
+        field_start + (sizeof(get_field_type<T, field>) - 1);
+    constexpr size_t reg_size = sizeof(void *);
+
+    if constexpr ((field_start / reg_size) != (field_end / reg_size)) {
+      return false;
+    }
+
+    return is_struct_members_reg_aligned<T, field + 1, fieldCount>();
+  }
+}
+
+template <typename T> constexpr bool is_regpassed_class_impl() {
+  if constexpr (std::is_class_v<T>) {
+    if constexpr (sizeof(T) > 0 && sizeof(T) <= 2 * sizeof(void *) &&
+                  is_trival_destr_and_copy_v<T>) {
+      return regpassed_structs_misaligned_fields_supported ||
+             is_struct_members_reg_aligned<T, 0, field_count_max128<T, 0>>();
+    }
+  }
+  return false;
+}
+
+template <typename T, size_t N, size_t OffsetFromBase>
+constexpr bool is_registerclass_first_reg_floating_helper() {
+  constexpr size_t field_count = field_count_max128<T, 0>;
+  constexpr size_t curr_field_offset = get_field_offset<T, N>;
+  using curr_field_type = get_field_type<T, N>;
+
+  // Consider a field if its offset starts before the register width
+  if constexpr (curr_field_offset < sizeof(uintptr_t)) {
+    if constexpr (std::is_class_v<curr_field_type>) {
+      // if the field itself is a class, do a recursive check
+      return is_registerclass_first_reg_floating_helper<curr_field_type, 0,
+                                                        curr_field_offset>();
+    } else {
+      // else check the field and any subsequent fields which start prior to the
+      // register width
+      constexpr bool is_current_float =
+          std::is_floating_point_v<curr_field_type>;
+      if constexpr ((N + 1) >= field_count) {
+        return is_current_float;
+      } else {
+        return is_current_float &&
+               is_registerclass_first_reg_floating_helper<T, N + 1,
+                                                          OffsetFromBase>();
+      }
+    }
+  }
+  return true;
+}
+
+template <typename T, size_t N>
+constexpr bool is_registerclass_second_reg_floating_helper() {
+  constexpr size_t field_count = field_count_max128<T, 0>;
+  constexpr size_t curr_field_offset = get_field_offset<T, N>;
+  using curr_field_type = get_field_type<T, N>;
+
+  // ignore any field whose data would fit into the first register
+  if constexpr (curr_field_offset + sizeof(curr_field_type) <=
+                sizeof(uintptr_t)) {
+    return is_registerclass_second_reg_floating_helper<T, N + 1>();
+  } else if constexpr (curr_field_offset >= sizeof(uintptr_t) &&
+                       curr_field_offset < 2 * sizeof(uintptr_t)) {
+    if constexpr (std::is_class_v<curr_field_type>) {
+      // if the field itself is a class, do a recursive check on the first field
+      return is_registerclass_first_reg_floating_helper<curr_field_type, 0,
+                                                        curr_field_offset>();
+    } else {
+      // else check the field and any subsequent fields which start prior to the
+      // register width
+      constexpr bool is_current_float =
+          std::is_floating_point_v<curr_field_type>;
+      if constexpr ((N + 1) >= field_count) {
+        return is_current_float;
+      } else {
+        return is_current_float &&
+               is_registerclass_second_reg_floating_helper<T, N + 1>();
+      }
+    }
+  }
+  return true;
+}
+
+template <typename T>
+static constexpr bool is_regpassed_class = is_regpassed_class_impl<T>();
+
+template <typename T>
+static constexpr bool is_registerclass_first_reg_floating_v =
+    is_registerclass_first_reg_floating_helper<T, 0, 0>();
+
+template <typename T>
+static constexpr bool is_registerclass_second_reg_floating_v =
+    is_registerclass_second_reg_floating_helper<T, 0>();
+
 //////////////////
 
 template <unsigned int TIntRegsLeft, typename TRet>
@@ -443,9 +733,42 @@ constexpr return_info_t classify_return() {
 
   if constexpr (std::is_void_v<TRet>) {
     ret.destination = ret_location_t::NONE;
-  } else if constexpr (std::is_class_v<TRet> &&
-                       (!is_class_with_trival_destr_and_copy_v<TRet> ||
-                        sizeof(NoVoid_TRet) > 16)) {
+  } else if constexpr (std::is_floating_point_v<TRet>) {
+    ret.destination = ret_location_t::FLOAT_REG;
+  } else if constexpr (is_one_reg_size<NoVoid_TRet> &&
+                       (std::is_integral_v<TRet> || std::is_pointer_v<TRet> ||
+                        std::is_lvalue_reference_v<TRet> ||
+                        std::is_enum_v<TRet>)) {
+    ret.destination = ret_location_t::INT_REG;
+  } else if constexpr (is_two_reg_size<NoVoid_TRet> &&
+                       std::is_integral_v<TRet>) {
+    ret.destination = ret_location_t::INT_REG2;
+  } else if constexpr (std::is_class_v<TRet> && is_regpassed_class<TRet>) {
+    constexpr bool is_first_reg_floating =
+        is_registerclass_first_reg_floating_v<TRet>;
+
+    if constexpr (is_one_reg_size<TRet>) {
+      ret.destination = is_first_reg_floating ? ret_location_t::FLOAT_REG
+                                              : ret_location_t::INT_REG;
+    } else if constexpr (is_two_reg_size<TRet>) {
+      constexpr bool is_second_reg_floating =
+          is_registerclass_second_reg_floating_v<TRet>;
+
+      if constexpr (is_first_reg_floating && is_second_reg_floating) {
+        ret.destination = ret_location_t::FLOAT_REG2;
+      } else if constexpr (mixed_regpassed_structs_supported &&
+                           !is_first_reg_floating && is_second_reg_floating) {
+        ret.destination = ret_location_t::INT_FLOAT_REG;
+      } else if constexpr (mixed_regpassed_structs_supported &&
+                           is_first_reg_floating && !is_second_reg_floating) {
+        ret.destination = ret_location_t::FLOAT_INT_REG;
+      } else {
+        ret.destination = ret_location_t::INT_REG2;
+      }
+    } else {
+      static_assert(!true_v<TRet>, "Unknown case");
+    }
+  } else if constexpr (std::is_class_v<TRet> && !is_regpassed_class<TRet>) {
     ret.extra_stackdata_space = sizeof(TRet);
     if constexpr (TIntRegsLeft > 0) {
       ret.destination = ret_location_t::STACK_REFERENCE_IN_REG_OUT_REG;
@@ -454,39 +777,6 @@ constexpr return_info_t classify_return() {
       ret.destination = ret_location_t::STACK_REFERENCE_IN_STACK_OUT_REG;
       ret.stack_space = sizeof(void *);
     }
-  } else if constexpr (std::is_floating_point_v<TRet>) {
-    ret.destination = ret_location_t::FLOAT_REG;
-  } else if constexpr (is_one_reg_size<NoVoid_TRet> &&
-                       (std::is_integral_v<TRet> || std::is_pointer_v<TRet> ||
-                        std::is_lvalue_reference_v<TRet> ||
-                        std::is_enum_v<TRet> ||
-                        is_class_with_trival_destr_and_copy_v<TRet>)) {
-    ret.destination = ret_location_t::INT_REG;
-  } else if constexpr (is_two_reg_size<NoVoid_TRet> &&
-                       std::is_integral_v<TRet>) {
-    ret.destination = ret_location_t::INT_REG2;
-  } else if constexpr (is_two_reg_size<NoVoid_TRet> &&
-                       is_class_with_trival_destr_and_copy_v<TRet> &&
-                       is_pair_class<TRet> &&
-                       std::is_floating_point_v<pair_class_first_type<TRet>> &&
-                       std::is_floating_point_v<pair_class_second_type<TRet>>) {
-    ret.destination = ret_location_t::FLOAT_REG2;
-  } else if constexpr (is_two_reg_size<NoVoid_TRet> &&
-                       is_class_with_trival_destr_and_copy_v<TRet> &&
-                       is_pair_class<TRet> && mixed_pair_structs_supported &&
-                       std::is_integral_v<pair_class_first_type<TRet>> &&
-                       std::is_floating_point_v<pair_class_second_type<TRet>>) {
-    ret.destination = ret_location_t::INT_FLOAT_REG;
-  } else if constexpr (is_two_reg_size<NoVoid_TRet> &&
-                       is_class_with_trival_destr_and_copy_v<TRet> &&
-                       is_pair_class<TRet> && mixed_pair_structs_supported &&
-                       std::is_floating_point_v<pair_class_first_type<TRet>> &&
-                       std::is_integral_v<pair_class_second_type<TRet>>) {
-    ret.destination = ret_location_t::FLOAT_INT_REG;
-  } else if constexpr (is_two_reg_size<NoVoid_TRet> &&
-                       is_class_with_trival_destr_and_copy_v<TRet> &&
-                       is_pair_class<TRet>) {
-    ret.destination = ret_location_t::INT_REG2;
   } else {
     static_assert(!true_v<TRet>, "Unknown case");
   }
@@ -505,7 +795,6 @@ template <unsigned int TIntRegsLeft, unsigned int TFloatRegsLeft,
           unsigned int I, unsigned int TotalParams, typename TFormalParam,
           typename... TFormalParams>
 constexpr param_info_t<TotalParams> classify_params() {
-
   if constexpr (TFloatRegsLeft > 0 && std::is_floating_point_v<TFormalParam>) {
     auto ret = classify_params<TIntRegsLeft, TFloatRegsLeft - 1, I + 1,
                                TotalParams, TFormalParams...>();
@@ -515,8 +804,7 @@ constexpr param_info_t<TotalParams> classify_params() {
                        (std::is_integral_v<TFormalParam> ||
                         std::is_pointer_v<TFormalParam> ||
                         std::is_lvalue_reference_v<TFormalParam> ||
-                        std::is_enum_v<TFormalParam> ||
-                        is_class_with_trival_destr_and_copy_v<TFormalParam>)) {
+                        std::is_enum_v<TFormalParam>)) {
     auto ret = classify_params<TIntRegsLeft - 1, TFloatRegsLeft, I + 1,
                                TotalParams, TFormalParams...>();
     ret.destinations[I] = param_location_t::INT_REG;
@@ -527,51 +815,65 @@ constexpr param_info_t<TotalParams> classify_params() {
                                TotalParams, TFormalParams...>();
     ret.destinations[I] = param_location_t::INT_REG2;
     return ret;
-  } else if constexpr (is_two_reg_size<TFormalParam> && TIntRegsLeft > 1 &&
-                       is_class_with_trival_destr_and_copy_v<TFormalParam> &&
-                       is_pair_class<TFormalParam> &&
-                       std::is_floating_point_v<
-                           pair_class_first_type<TFormalParam>> &&
-                       std::is_floating_point_v<
-                           pair_class_second_type<TFormalParam>>) {
-    auto ret = classify_params<TIntRegsLeft, TFloatRegsLeft - 2, I + 1,
-                               TotalParams, TFormalParams...>();
-    ret.destinations[I] = param_location_t::FLOAT_REG2;
-    return ret;
-  } else if constexpr (is_two_reg_size<TFormalParam> && TIntRegsLeft > 1 &&
-                       is_class_with_trival_destr_and_copy_v<TFormalParam> &&
-                       is_pair_class<TFormalParam> &&
-                       mixed_pair_structs_supported &&
-                       std::is_integral_v<
-                           pair_class_first_type<TFormalParam>> &&
-                       std::is_floating_point_v<
-                           pair_class_second_type<TFormalParam>>) {
-    auto ret = classify_params<TIntRegsLeft - 1, TFloatRegsLeft - 1, I + 1,
-                               TotalParams, TFormalParams...>();
-    ret.destinations[I] = param_location_t::INT_FLOAT_REG;
-    return ret;
-  } else if constexpr (is_two_reg_size<TFormalParam> && TIntRegsLeft > 1 &&
-                       is_class_with_trival_destr_and_copy_v<TFormalParam> &&
-                       is_pair_class<TFormalParam> &&
-                       mixed_pair_structs_supported &&
-                       std::is_floating_point_v<
-                           pair_class_first_type<TFormalParam>> &&
-                       std::is_integral_v<
-                           pair_class_second_type<TFormalParam>>) {
-    auto ret = classify_params<TIntRegsLeft - 1, TFloatRegsLeft - 1, I + 1,
-                               TotalParams, TFormalParams...>();
-    ret.destinations[I] = param_location_t::FLOAT_INT_REG;
-    return ret;
-  } else if constexpr (is_two_reg_size<TFormalParam> && TIntRegsLeft > 1 &&
-                       is_class_with_trival_destr_and_copy_v<TFormalParam> &&
-                       is_pair_class<TFormalParam>) {
-    auto ret = classify_params<TIntRegsLeft - 2, TFloatRegsLeft, I + 1,
-                               TotalParams, TFormalParams...>();
-    ret.destinations[I] = param_location_t::INT_REG2;
-    return ret;
-  } else if constexpr (TIntRegsLeft > 0 && std::is_class_v<TFormalParam> &&
-                       (!direct_stack_references_supported ||
-                        !is_trival_destr_and_copy_v<TFormalParam>)) {
+  } else if constexpr (std::is_class_v<TFormalParam> &&
+                       is_regpassed_class<TFormalParam> &&
+                       is_one_reg_size<TFormalParam>) {
+
+    constexpr bool is_first_reg_floating =
+        is_registerclass_first_reg_floating_v<TFormalParam>;
+
+    if constexpr (TFloatRegsLeft > 0 && is_first_reg_floating) {
+      auto ret = classify_params<TIntRegsLeft, TFloatRegsLeft - 1, I + 1,
+                                 TotalParams, TFormalParams...>();
+      ret.destinations[I] = param_location_t::FLOAT_REG;
+      return ret;
+    } else if constexpr (TIntRegsLeft > 0 && !is_first_reg_floating) {
+      auto ret = classify_params<TIntRegsLeft - 1, TFloatRegsLeft, I + 1,
+                                 TotalParams, TFormalParams...>();
+      ret.destinations[I] = param_location_t::INT_REG;
+      return ret;
+    }
+  } else if constexpr (std::is_class_v<TFormalParam> &&
+                       is_regpassed_class<TFormalParam> &&
+                       is_two_reg_size<TFormalParam>) {
+
+    constexpr bool is_first_reg_floating =
+        is_registerclass_first_reg_floating_v<TFormalParam>;
+    constexpr bool is_second_reg_floating =
+        is_registerclass_second_reg_floating_v<TFormalParam>;
+
+    if constexpr (TFloatRegsLeft > 1 && is_first_reg_floating &&
+                  is_second_reg_floating) {
+      auto ret = classify_params<TIntRegsLeft, TFloatRegsLeft - 2, I + 1,
+                                 TotalParams, TFormalParams...>();
+      ret.destinations[I] = param_location_t::FLOAT_REG2;
+      return ret;
+    } else if constexpr (mixed_regpassed_structs_supported &&
+                         TIntRegsLeft > 0 && TFloatRegsLeft > 0 &&
+                         !is_first_reg_floating && is_second_reg_floating) {
+      auto ret = classify_params<TIntRegsLeft - 1, TFloatRegsLeft - 1, I + 1,
+                                 TotalParams, TFormalParams...>();
+      ret.destinations[I] = param_location_t::INT_FLOAT_REG;
+      return ret;
+    } else if constexpr (mixed_regpassed_structs_supported &&
+                         TFloatRegsLeft > 0 && TIntRegsLeft > 0 &&
+                         is_first_reg_floating && !is_second_reg_floating) {
+      auto ret = classify_params<TIntRegsLeft - 1, TFloatRegsLeft - 1, I + 1,
+                                 TotalParams, TFormalParams...>();
+      ret.destinations[I] = param_location_t::FLOAT_INT_REG;
+      return ret;
+    } else if constexpr (TIntRegsLeft > 1) {
+      auto ret = classify_params<TIntRegsLeft - 2, TFloatRegsLeft, I + 1,
+                                 TotalParams, TFormalParams...>();
+      ret.destinations[I] = param_location_t::INT_REG2;
+      return ret;
+    }
+  }
+
+  // Stack-based parameters
+  if constexpr (TIntRegsLeft > 0 && std::is_class_v<TFormalParam> &&
+                (!direct_stack_references_supported ||
+                 !is_trival_destr_and_copy_v<TFormalParam>)) {
     auto ret = classify_params<TIntRegsLeft - 1, TFloatRegsLeft, I + 1,
                                TotalParams, TFormalParams...>();
     ret.destinations[I] = param_location_t::STACK_REFERENCE_IN_REG;
