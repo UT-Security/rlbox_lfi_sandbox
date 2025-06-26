@@ -1,5 +1,8 @@
 #pragma once
 
+// This file is adapted from https://github.com/UT-Security/sepstack-invoker
+// Do not make local fixes without upstreaming.
+
 #include <array>
 #include <limits>
 #include <memory>
@@ -651,65 +654,50 @@ template <typename T> constexpr bool is_regpassed_class_impl() {
   return false;
 }
 
-template <typename T, size_t N, size_t OffsetFromBase>
-constexpr bool is_registerclass_first_reg_floating_helper() {
+// Function returns true if all struct members within the given offsets are
+// floating-point/floating-point-in-nested-classes
+template <typename T, size_t N, size_t StartOffset, size_t EndOffset>
+constexpr bool are_members_floating_point() {
   constexpr size_t field_count = field_count_max128<T, 0>;
-  constexpr size_t curr_field_offset = get_field_offset<T, N>;
-  using curr_field_type = get_field_type<T, N>;
 
-  // Consider a field if its offset starts before the register width
-  if constexpr (curr_field_offset < sizeof(uintptr_t)) {
-    if constexpr (std::is_class_v<curr_field_type>) {
-      // if the field itself is a class, do a recursive check
-      return is_registerclass_first_reg_floating_helper<curr_field_type, 0,
-                                                        curr_field_offset>();
-    } else {
-      // else check the field and any subsequent fields which start prior to the
-      // register width
+  if constexpr (N >= field_count) {
+    // We are past the end of available/relevant fields.
+    // By default we assume that the values are floating point.
+    return true;
+  } else {
+    using curr_field_type = get_field_type<T, N>;
+    constexpr size_t start_field_offset = get_field_offset<T, N>;
+    constexpr size_t end_field_offset = start_field_offset + (sizeof(T) - 1);
+
+    if constexpr (start_field_offset > EndOffset) {
+      // Current field lies beyond the Offsets being considered.
+      // By default we assume that the values are floating point.
+      return true;
+    } else if constexpr (end_field_offset < StartOffset) {
+      // Current field lies prior to the Offsets being considered. Move to the
+      // next field
+      return are_members_floating_point<T, N + 1, StartOffset, EndOffset>();
+    } else if constexpr (!std::is_class_v<curr_field_type>) {
       constexpr bool is_current_float =
           std::is_floating_point_v<curr_field_type>;
-      if constexpr ((N + 1) >= field_count) {
-        return is_current_float;
-      } else {
-        return is_current_float &&
-               is_registerclass_first_reg_floating_helper<T, N + 1,
-                                                          OffsetFromBase>();
+      if constexpr (is_current_float) {
+        return are_members_floating_point<T, N + 1, StartOffset, EndOffset>();
       }
-    }
-  }
-  return true;
-}
-
-template <typename T, size_t N>
-constexpr bool is_registerclass_second_reg_floating_helper() {
-  constexpr size_t field_count = field_count_max128<T, 0>;
-  constexpr size_t curr_field_offset = get_field_offset<T, N>;
-  using curr_field_type = get_field_type<T, N>;
-
-  // ignore any field whose data would fit into the first register
-  if constexpr (curr_field_offset + sizeof(curr_field_type) <=
-                sizeof(uintptr_t)) {
-    return is_registerclass_second_reg_floating_helper<T, N + 1>();
-  } else if constexpr (curr_field_offset >= sizeof(uintptr_t) &&
-                       curr_field_offset < 2 * sizeof(uintptr_t)) {
-    if constexpr (std::is_class_v<curr_field_type>) {
-      // if the field itself is a class, do a recursive check on the first field
-      return is_registerclass_first_reg_floating_helper<curr_field_type, 0,
-                                                        curr_field_offset>();
-    } else {
-      // else check the field and any subsequent fields which start prior to the
-      // register width
+      return false;
+    } else if constexpr (std::is_class_v<curr_field_type>) {
+      constexpr size_t class_start_offset = 0;
+      constexpr size_t class_end_offset = EndOffset - start_field_offset;
       constexpr bool is_current_float =
-          std::is_floating_point_v<curr_field_type>;
-      if constexpr ((N + 1) >= field_count) {
-        return is_current_float;
-      } else {
-        return is_current_float &&
-               is_registerclass_second_reg_floating_helper<T, N + 1>();
+          are_members_floating_point<curr_field_type, 0, class_start_offset,
+                                     class_end_offset>();
+      if constexpr (is_current_float) {
+        return are_members_floating_point<T, N + 1, StartOffset, EndOffset>();
       }
+      return false;
+    } else {
+      static_assert(!true_v<T>, "Unknown case");
     }
   }
-  return true;
 }
 
 template <typename T>
@@ -717,11 +705,12 @@ static constexpr bool is_regpassed_class = is_regpassed_class_impl<T>();
 
 template <typename T>
 static constexpr bool is_registerclass_first_reg_floating_v =
-    is_registerclass_first_reg_floating_helper<T, 0, 0>();
+    are_members_floating_point<T, 0, 0, sizeof(uintptr_t) - 1>();
 
 template <typename T>
 static constexpr bool is_registerclass_second_reg_floating_v =
-    is_registerclass_second_reg_floating_helper<T, 0>();
+    are_members_floating_point<T, 0, sizeof(uintptr_t),
+                               2 * sizeof(uintptr_t) - 1>();
 
 //////////////////
 
