@@ -1,4 +1,4 @@
-[![Tests](https://github.com/PLSysSec/rlbox_lfi_sandbox/actions/workflows/cmake.yml/badge.svg)](https://github.com/PLSysSec/rlbox_lfi_sandbox/actions/workflows/cmake.yml)
+<!-- [![Tests](https://github.com/PLSysSec/rlbox_lfi_sandbox/actions/workflows/cmake.yml/badge.svg)](https://github.com/PLSysSec/rlbox_lfi_sandbox/actions/workflows/cmake.yml) -->
 
 # RLBox LFI Sandbox Integration
 
