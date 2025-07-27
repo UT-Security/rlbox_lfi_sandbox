@@ -1,5 +1,5 @@
-cmake_minimum_required(VERSION 3.22)
-cmake_policy(VERSION 3.16)
+cmake_minimum_required(VERSION 3.24)
+cmake_policy(VERSION 3.24)
 
 project(rlbox_lfi
         VERSION 0.1
@@ -115,6 +115,7 @@ endif()
 FetchContent_Declare(
   lficlang
   URL ${lfi-clang-url}
+  DOWNLOAD_EXTRACT_TIMESTAMP
 )
 FetchContent_GetProperties(lficlang)
 if(NOT lficlang_POPULATED)
@@ -238,6 +239,8 @@ target_link_libraries(test_rlbox_glue Catch2::Catch2
                                       ${CMAKE_DL_LIBS}
                                       liblfi
 )
+
+add_dependencies(test_rlbox_glue build-liblfi)
 
 if(UNIX AND NOT (${CMAKE_SYSTEM_NAME} MATCHES "Darwin"))
   target_link_libraries(test_rlbox_glue rt)
