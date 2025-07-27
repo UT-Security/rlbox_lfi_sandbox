@@ -8,12 +8,26 @@ For details about the RLBox sandboxing APIs, see [here](https://github.com/PLSys
 
 ## Building/Running the tests
 
+This integration currently only supports Linux on x86-64 and aarch64 targets.
+
 You can build and run the tests using cmake with the following commands.
 
 ```bash
 cmake -S . -B ./build
 cmake --build ./build --parallel
 cmake --build ./build --target test
+```
+
+If you want to cross-compile aarch64 binaries on an x86-64 host, you can do this through
+
+```bash
+cmake -S . -B ./build --parallel -DCMAKE_TOOLCHAIN_FILE=TC-aarch64.cmake
+```
+
+The test binaries can run through qemu with the command
+
+```bash
+qemu-aarch64 -L /usr/aarch64-linux-gnu/ ./build/test_rlbox_glue
 ```
 
 ## Contributing Code

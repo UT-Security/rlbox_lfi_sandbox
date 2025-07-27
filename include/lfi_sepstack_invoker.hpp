@@ -13,14 +13,8 @@
 #include <type_traits>
 #include <utility>
 
-#include "lfi.h"
-
-extern "C" {
-
-extern void lfi_trampoline();
-}
-
-#include "lfi_ctx_offsets.h"
+#include "lfi_arch.h"
+#include "lfi_core.h"
 
 namespace sepstack_invoker_detail {
 
@@ -171,69 +165,69 @@ static constexpr bool returnslot_ptr_reg_consumes_parameter = true;
 // address implicit (true).
 static constexpr bool direct_stack_references_supported = true;
 
-static uint64_t &get_param_register_ref(LFIContext *ctx, REG_TYPE type,
+static uint64_t &get_param_register_ref(LFIRegs *ctx, REG_TYPE type,
                                         unsigned int reg_num) {
   if (type == REG_TYPE::INT) {
     if (reg_num == 0) {
-      return ctx->regs.rdi;
+      return ctx->rdi;
     } else if (reg_num == 1) {
-      return ctx->regs.rsi;
+      return ctx->rsi;
     } else if (reg_num == 2) {
-      return ctx->regs.rdx;
+      return ctx->rdx;
     } else if (reg_num == 3) {
-      return ctx->regs.rcx;
+      return ctx->rcx;
     } else if (reg_num == 4) {
-      return ctx->regs.r8;
+      return ctx->r8;
     } else if (reg_num == 5) {
-      return ctx->regs.r9;
+      return ctx->r9;
     }
   } else if (type == REG_TYPE::FLOAT) {
     if (reg_num == 0) {
-      return ctx->regs.xmm[0];
+      return ctx->xmm[0];
     } else if (reg_num == 1) {
-      return ctx->regs.xmm[1];
+      return ctx->xmm[2];
     } else if (reg_num == 2) {
-      return ctx->regs.xmm[2];
+      return ctx->xmm[4];
     } else if (reg_num == 3) {
-      return ctx->regs.xmm[3];
+      return ctx->xmm[6];
     } else if (reg_num == 4) {
-      return ctx->regs.xmm[4];
+      return ctx->xmm[8];
     } else if (reg_num == 5) {
-      return ctx->regs.xmm[5];
+      return ctx->xmm[10];
     } else if (reg_num == 6) {
-      return ctx->regs.xmm[6];
+      return ctx->xmm[12];
     } else if (reg_num == 7) {
-      return ctx->regs.xmm[7];
+      return ctx->xmm[14];
     }
   }
   abort();
 }
 
-static uint64_t &get_return_register_ref(LFIContext *ctx, REG_TYPE type,
+static uint64_t &get_return_register_ref(LFIRegs *ctx, REG_TYPE type,
                                          unsigned int reg_num) {
   if (type == REG_TYPE::INT) {
     if (reg_num == 0) {
-      return ctx->regs.rax;
+      return ctx->rax;
     } else if (reg_num == 1) {
-      return ctx->regs.rdx;
+      return ctx->rdx;
     }
   } else if (type == REG_TYPE::FLOAT) {
     if (reg_num == 0) {
-      return ctx->regs.xmm[0];
+      return ctx->xmm[0];
     } else if (reg_num == 1) {
-      return ctx->regs.xmm[1];
+      return ctx->xmm[2];
     }
   }
 
   abort();
 }
 
-static uint64_t &get_return_slotptr_register_ref(LFIContext *ctx) {
-  return ctx->regs.rdi;
+static uint64_t &get_return_slotptr_register_ref(LFIRegs *ctx) {
+  return ctx->rdi;
 }
 
-static uint64_t &get_stack_register_ref(LFIContext *ctx) {
-  return ctx->regs.rsp;
+static uint64_t &get_stack_register_ref(LFIRegs *ctx) {
+  return ctx->rsp;
 }
 
 #  elif defined(__aarch64__)
@@ -263,73 +257,73 @@ static constexpr bool returnslot_ptr_reg_consumes_parameter = false;
 // address implicit (true).
 static constexpr bool direct_stack_references_supported = false;
 
-static uint64_t &get_param_register_ref(LFIContext *ctx, REG_TYPE type,
+static uint64_t &get_param_register_ref(LFIRegs *ctx, REG_TYPE type,
                                         unsigned int reg_num) {
   if (type == REG_TYPE::INT) {
     if (reg_num == 0) {
-      return ctx->regs.x0;
+      return ctx->x0;
     } else if (reg_num == 1) {
-      return ctx->regs.x1;
+      return ctx->x1;
     } else if (reg_num == 2) {
-      return ctx->regs.x2;
+      return ctx->x2;
     } else if (reg_num == 3) {
-      return ctx->regs.x3;
+      return ctx->x3;
     } else if (reg_num == 4) {
-      return ctx->regs.x4;
+      return ctx->x4;
     } else if (reg_num == 5) {
-      return ctx->regs.x5;
+      return ctx->x5;
     } else if (reg_num == 6) {
-      return ctx->regs.x6;
+      return ctx->x6;
     } else if (reg_num == 7) {
-      return ctx->regs.x7;
+      return ctx->x7;
     }
   } else if (type == REG_TYPE::FLOAT) {
     if (reg_num == 0) {
-      return ctx->regs.vector[0];
+      return ctx->vector[0];
     } else if (reg_num == 1) {
-      return ctx->regs.vector[2];
+      return ctx->vector[2];
     } else if (reg_num == 2) {
-      return ctx->regs.vector[4];
+      return ctx->vector[4];
     } else if (reg_num == 3) {
-      return ctx->regs.vector[6];
+      return ctx->vector[6];
     } else if (reg_num == 4) {
-      return ctx->regs.vector[8];
+      return ctx->vector[8];
     } else if (reg_num == 5) {
-      return ctx->regs.vector[10];
+      return ctx->vector[10];
     } else if (reg_num == 6) {
-      return ctx->regs.vector[12];
+      return ctx->vector[12];
     } else if (reg_num == 7) {
-      return ctx->regs.vector[14];
+      return ctx->vector[14];
     }
   }
   abort();
 }
 
-static uint64_t &get_return_register_ref(LFIContext *ctx, REG_TYPE type,
+static uint64_t &get_return_register_ref(LFIRegs *ctx, REG_TYPE type,
                                          unsigned int reg_num) {
   if (type == REG_TYPE::INT) {
     if (reg_num == 0) {
-      return ctx->regs.x0;
+      return ctx->x0;
     } else if (reg_num == 1) {
-      return ctx->regs.x1;
+      return ctx->x1;
     }
   } else if (type == REG_TYPE::FLOAT) {
     if (reg_num == 0) {
-      return ctx->regs.vector[0];
+      return ctx->vector[0];
     } else if (reg_num == 1) {
-      return ctx->regs.vector[2];
+      return ctx->vector[2];
     }
   }
 
   abort();
 }
 
-static uint64_t &get_return_slotptr_register_ref(LFIContext *ctx) {
-  return ctx->regs.x8;
+static uint64_t &get_return_slotptr_register_ref(LFIRegs *ctx) {
+  return ctx->x8;
 }
 
-static uint64_t &get_stack_register_ref(LFIContext *ctx) {
-  return ctx->regs.sp;
+static uint64_t &get_stack_register_ref(LFIRegs *ctx) {
+  return ctx->sp;
 }
 
 #  else
@@ -903,7 +897,7 @@ static void safe_range(uintptr_t sbx_mem_start, uintptr_t sbx_mem_end,
 template <unsigned int I, unsigned int TotalParams, unsigned int IntRegParams,
           unsigned int FloatRegParams,
           std::array<param_location_t, TotalParams> ParamDestinations>
-void push_param(LFIContext *ctx, uintptr_t sbx_mem_start,
+void push_param(LFIRegs *ctx, uintptr_t sbx_mem_start,
                 uintptr_t sbx_mem_end, uintptr_t stackloc,
                 uintptr_t stack_extradata_loc) {}
 
@@ -912,7 +906,7 @@ template <unsigned int I, unsigned int TotalParams, unsigned int IntRegParams,
           std::array<param_location_t, TotalParams> ParamDestinations,
           typename TFormalParam, typename... TFormalParams,
           typename TActualParam, typename... TActualParams>
-void push_param(LFIContext *ctx, uintptr_t sbx_mem_start,
+void push_param(LFIRegs *ctx, uintptr_t sbx_mem_start,
                 uintptr_t sbx_mem_end, uintptr_t stackloc,
                 uintptr_t stack_extradata_loc, TActualParam arg,
                 TActualParams &&...args) {
@@ -1056,7 +1050,7 @@ void push_param(LFIContext *ctx, uintptr_t sbx_mem_start,
 template <unsigned int TotalParams, ret_location_t RetDestination,
           std::array<param_location_t, TotalParams> ParamDestinations,
           typename TRet, typename... TFormalParams, typename... TActualParams>
-void *push_return_and_params(LFIContext *ctx, uintptr_t sbx_mem_start,
+void *push_return_and_params(LFIRegs *ctx, uintptr_t sbx_mem_start,
                              uintptr_t sbx_mem_end, uintptr_t stackloc,
                              uintptr_t stack_extradata_loc,
                              TActualParams &&...args) {
@@ -1104,7 +1098,7 @@ void *push_return_and_params(LFIContext *ctx, uintptr_t sbx_mem_start,
 }
 
 template <typename TRet, typename... TFormalParams, typename... TActualParams>
-auto invoke_func_on_separate_stack_helper(LFIContext *ctx,
+auto invoke_func_on_separate_stack_helper(LFIRegs *ctx,
                                           uintptr_t sbx_mem_start,
                                           uintptr_t sbx_mem_end,
                                           TRet (*dummy)(TFormalParams...),
@@ -1133,7 +1127,7 @@ auto invoke_func_on_separate_stack_helper(LFIContext *ctx,
           ctx, sbx_mem_start, sbx_mem_end, new_stack_loc, stack_extradata_loc,
           std::forward<TActualParams>(args)...);
 
-  lfi_trampoline();
+  lfi_trampoline_struct();
 
   if constexpr (ret_info.destination == ret_location_t::NONE) {
     // noop
@@ -1187,7 +1181,7 @@ auto invoke_func_on_separate_stack_helper(LFIContext *ctx,
 template <unsigned int I, unsigned int TotalParams, unsigned int IntRegParams,
           unsigned int FloatRegParams,
           std::array<param_location_t, TotalParams> ParamDestinations>
-std::tuple<> collect_params_from_context_noret(LFIContext *ctx,
+std::tuple<> collect_params_from_context_noret(LFIRegs *ctx,
                                                uintptr_t sbx_mem_start,
                                                uintptr_t sbx_mem_end,
                                                uintptr_t stackloc) {
@@ -1199,7 +1193,7 @@ template <unsigned int I, unsigned int TotalParams, unsigned int IntRegParams,
           std::array<param_location_t, TotalParams> ParamDestinations,
           typename TParam, typename... TParams>
 std::tuple<TParam, TParams...>
-collect_params_from_context_noret(LFIContext *ctx,
+collect_params_from_context_noret(LFIRegs *ctx,
                                   uintptr_t sbx_mem_start,
                                   uintptr_t sbx_mem_end, uintptr_t stackloc) {
   if constexpr (ParamDestinations[I] == param_location_t::STACK) {
@@ -1359,7 +1353,7 @@ template <unsigned int TotalParams, ret_location_t RetDestination,
           std::array<param_location_t, TotalParams> ParamDestinations,
           typename TRet, typename... TParams>
 std::tuple<TParams...>
-collect_params_from_context(LFIContext *ctx, uintptr_t sbx_mem_start,
+collect_params_from_context(LFIRegs *ctx, uintptr_t sbx_mem_start,
                             uintptr_t sbx_mem_end, uintptr_t stackloc,
                             uintptr_t *out_ret_slot) {
 
@@ -1386,7 +1380,7 @@ collect_params_from_context(LFIContext *ctx, uintptr_t sbx_mem_start,
 }
 
 template <typename TRet, typename... TParams>
-void invoke_callback_from_separate_stack_helper(LFIContext *ctx,
+void invoke_callback_from_separate_stack_helper(LFIRegs *ctx,
                                                 uintptr_t sbx_mem_start,
                                                 uintptr_t sbx_mem_end,
                                                 TRet (*func_ptr)(TParams...)) {
@@ -1476,7 +1470,7 @@ using memberfuncptr_to_cfuncptr_t =
 }; // namespace sepstack_invoker_detail
 
 template <typename TFuncPtr, typename... TActualParams>
-auto invoke_func_on_separate_stack(LFIContext* ctx,
+auto invoke_func_on_separate_stack(LFIRegs* ctx,
                                    uintptr_t sbx_mem_start,
                                    uintptr_t sbx_mem_end,
                                    uintptr_t sbx_stack_loc,
@@ -1488,12 +1482,12 @@ auto invoke_func_on_separate_stack(LFIContext* ctx,
   using TCFuncPtr =
       sepstack_invoker_detail::memberfuncptr_to_cfuncptr_t<TFuncPtr>;
 
-  auto prev_host_stack_ptr = ctx->kstackp;
+  auto prev_host_stack_ptr = ctx->host_sp;
   auto prev_sbx_stack_ptr = sepstack_invoker_detail::get_stack_register_ref(ctx);
   sepstack_invoker_detail::get_stack_register_ref(ctx) = prev_sbx_stack_ptr != 0 ? prev_sbx_stack_ptr : sbx_stack_loc;
 
   auto restore_context = sepstack_invoker_detail::make_scope_exit([&]() {
-    ctx->kstackp = prev_host_stack_ptr;
+    ctx->host_sp = prev_host_stack_ptr;
     sepstack_invoker_detail::get_stack_register_ref(ctx) = prev_sbx_stack_ptr;
   });
 
@@ -1503,7 +1497,7 @@ auto invoke_func_on_separate_stack(LFIContext* ctx,
 }
 
 template <typename TFuncPtr>
-void invoke_callback_from_separate_stack(LFIContext* ctx,
+void invoke_callback_from_separate_stack(LFIRegs* ctx,
                                          uintptr_t sbx_mem_start,
                                          uintptr_t sbx_mem_end,
                                          TFuncPtr func_ptr) {

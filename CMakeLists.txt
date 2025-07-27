@@ -89,12 +89,11 @@ add_subdirectory("${catch2_SOURCE_DIR}")
 list(APPEND CMAKE_MODULE_PATH "${catch2_SOURCE_DIR}/contrib")
 
 FetchContent_Declare(
-  lfi
-  GIT_REPOSITORY https://github.com/zyedidia/lfi.git
-  GIT_TAG update-lfi-ret)
-FetchContent_GetProperties(lfi)
+  lfi-runtime
+  GIT_REPOSITORY https://github.com/lfi-project/lfi-runtime/)
+FetchContent_GetProperties(lfi-runtime)
 if(NOT lfi_POPULATED)
-  FetchContent_Populate(lfi)
+  FetchContent_Populate(lfi-runtime)
 endif()
 
 if (${CMAKE_SYSTEM_NAME} MATCHES "Linux")
@@ -102,9 +101,11 @@ if (${CMAKE_SYSTEM_NAME} MATCHES "Linux")
     set (lfi-clang-url ${CMAKE_LFI_CROSS_COMPILER})
   else()
     if (${CMAKE_HOST_SYSTEM_PROCESSOR} MATCHES "x86_64")
-      set (lfi-clang-url https://github.com/zyedidia/lfi/releases/download/v0.7/x86_64-lfi-clang.tar.gz)
+      set (lfi-clang-url https://github.com/lfi-project/lfi-llvm-toolchain/releases/download/v0.9/x86_64-lfi-clang.tar.gz)
+    elseif (${CMAKE_HOST_SYSTEM_PROCESSOR} MATCHES "aarch64")
+      set (lfi-clang-url https://github.com/lfi-project/lfi-llvm-toolchain/releases/download/v0.9/aarch64-lfi-clang.tar.gz)
     else()
-      message(FATAL_ERROR "LFI binaries only available for x86_64.")
+      message(FATAL_ERROR "LFI binaries only available for x86_64 and aarch64.")
     endif()
   endif()
 else()
@@ -120,7 +121,7 @@ if(NOT lficlang_POPULATED)
   FetchContent_Populate(lficlang)
 endif()
 
-# set (lficlang_SOURCE_DIR "/media/shr/extradrive1/Code/LibrarySandboxing/lfi-trampoline-demo/x86_64-lfi-clang")
+# set (lficlang_SOURCE_DIR "/local/drive/x86_64-lfi-clang")
 
 if(DEV)
   if(MSVC)
@@ -141,10 +142,10 @@ if(DEV)
     set(LFI_SBX_BUILD_TYPE_FLAGS -O0)
 else()
   if ("${CMAKE_BUILD_TYPE}" STREQUAL "Debug")
-    # set(LFI_BUILD_TYPE "debug")
-    # set(LFI_SBX_BUILD_TYPE_FLAGS -O0)
-    set(LFI_BUILD_TYPE "release")
-    set(LFI_SBX_BUILD_TYPE_FLAGS -O3)
+    set(LFI_BUILD_TYPE "debug")
+    set(LFI_SBX_BUILD_TYPE_FLAGS -O0)
+    # set(LFI_BUILD_TYPE "release")
+    # set(LFI_SBX_BUILD_TYPE_FLAGS -O3)
   elseif ("${CMAKE_BUILD_TYPE}" STREQUAL "RelWithDebInfo")
     set(LFI_BUILD_TYPE "debugoptimized")
     set(LFI_SBX_BUILD_TYPE_FLAGS -O3)
@@ -160,12 +161,12 @@ endif()
 # lfi ###################
 
 set(LFI_RUNTIME_DIR_NAME "build-liblfi-${LFI_BUILD_TYPE}")
-set(LFI_RUNTIME_DIR "${lfi_SOURCE_DIR}/${LFI_RUNTIME_DIR_NAME}")
-set(LIBLFI_PATH ${LFI_RUNTIME_DIR}/liblfi/liblfi.a)
+set(LFI_RUNTIME_DIR "${lfi-runtime_SOURCE_DIR}/${LFI_RUNTIME_DIR_NAME}")
+set(LIBLFI_PATH ${LFI_RUNTIME_DIR}/liblfi.a)
 
 add_custom_command(OUTPUT "${LFI_RUNTIME_DIR}"
-                   WORKING_DIRECTORY "${lfi_SOURCE_DIR}"
-                   COMMAND meson setup ${LFI_RUNTIME_DIR_NAME} -Dliblfi-only=true --buildtype ${LFI_BUILD_TYPE} ${CMAKE_CROSS_MESON_FILE}
+                   WORKING_DIRECTORY "${lfi-runtime_SOURCE_DIR}"
+                   COMMAND meson setup ${LFI_RUNTIME_DIR_NAME} --buildtype ${LFI_BUILD_TYPE} ${CMAKE_CROSS_MESON_FILE}
                    COMMENT "Configuring LFI runtime")
 
 add_custom_command(OUTPUT "${LIBLFI_PATH}"
@@ -174,8 +175,7 @@ add_custom_command(OUTPUT "${LIBLFI_PATH}"
                    COMMAND ninja
                    COMMENT "Building LFI runtime")
 
-add_custom_target(genlfi ALL DEPENDS ${LIBLFI_PATH})
-
+add_custom_target(build-liblfi ALL DEPENDS ${LIBLFI_PATH})
 
 if(DEV)
   if(NOT MSVC)
@@ -189,32 +189,32 @@ add_library(liblfi STATIC IMPORTED)
 add_dependencies(liblfi "${LIBLFI_PATH}")
 set_target_properties(liblfi PROPERTIES
   IMPORTED_LOCATION "${LIBLFI_PATH}"
-  INTERFACE_INCLUDE_DIRECTORIES "${lfi_SOURCE_DIR}/liblfi/include"
+  INTERFACE_INCLUDE_DIRECTORIES "${lfi-runtime_SOURCE_DIR}/core/include;${lfi-runtime_SOURCE_DIR}/linux/include"
 )
 
 # Sandboxed tests lib ###################
 
 set(INCSTUB_FILENAME "glue_lib_lfi")
 set(GLUE_LIB_ELF "${CMAKE_BINARY_DIR}/${INCSTUB_FILENAME}")
-set(LFI_SANDBOX_WRAPPER ${CMAKE_SOURCE_DIR}/src/main.S)
-set(LFI_RLBOX_RT_SRC "${CMAKE_SOURCE_DIR}/src/trampoline.S" "${CMAKE_SOURCE_DIR}/src/lfi_callback.c")
 set(GLUE_LIB_EMBED_SRC "${CMAKE_SOURCE_DIR}/src/incstub.s")
 set(GLUE_LIB_EMBED_DEST "${CMAKE_BINARY_DIR}/incstub.s")
+set(LFI_SYSROOT_PATH "${lficlang_SOURCE_DIR}/sysroot/usr/lib")
 
 add_custom_command(OUTPUT "${GLUE_LIB_ELF}"
                    DEPENDS "${GLUE_LIB_EMBED_SRC}" ${rlbox_SOURCE_DIR}/code/tests/rlbox_glue/lib/libtest.c
                    COMMAND  PATH=$ENV{PATH}:${lficlang_SOURCE_DIR}/lfi-bin
                             ${lficlang_SOURCE_DIR}/bin/clang
                             ${LFI_SBX_BUILD_TYPE_FLAGS}
+                            -Wl,--export-dynamic
                             -static-pie
                             -o ${GLUE_LIB_ELF}
-                            ${LFI_SANDBOX_WRAPPER}
                             ${rlbox_SOURCE_DIR}/code/tests/rlbox_glue/lib/libtest.c
+                            -L ${LFI_SYSROOT_PATH} -lboxrt
                    COMMENT "Building lfi sandboxed library")
 
 configure_file(${GLUE_LIB_EMBED_SRC} ${GLUE_LIB_EMBED_DEST})
 
-add_custom_target(genlib ALL DEPENDS ${GLUE_LIB_ELF} ${GLUE_LIB_EMBED_DEST})
+add_custom_target(build-sandboxed-library ALL DEPENDS ${GLUE_LIB_ELF} ${GLUE_LIB_EMBED_DEST})
 
 # Tests executables ###################
 
@@ -225,7 +225,6 @@ find_package(Threads REQUIRED)
 
 add_executable(test_rlbox_glue test/test_lfi_sandbox_glue_main.cpp
                                test/test_lfi_sandbox_glue.cpp
-                               ${LFI_RLBOX_RT_SRC}
                                ${GLUE_LIB_EMBED_DEST}
                                )
 target_include_directories(test_rlbox_glue PUBLIC ${CMAKE_SOURCE_DIR}/include

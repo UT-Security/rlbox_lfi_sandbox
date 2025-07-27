@@ -13,4 +13,4 @@ set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
 set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE ONLY)
 
 set(CMAKE_CROSS_MESON_FILE --cross-file ${CMAKE_SOURCE_DIR}/meson-aarch64.txt)
-set(CMAKE_LFI_CROSS_COMPILER https://github.com/zyedidia/lfi/releases/download/v0.8/aarch64-lfi-clang-host-x86_64.tar.gz)
+set(CMAKE_LFI_CROSS_COMPILER https://github.com/lfi-project/lfi-llvm-toolchain/releases/download/v0.9/aarch64-lfi-clang-host-x86_64.tar.gz)
