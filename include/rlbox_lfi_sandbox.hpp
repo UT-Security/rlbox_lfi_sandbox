@@ -156,6 +156,8 @@ private:
   struct LFILinuxEngine * mLFILinuxEngine {0};
   struct LFILinuxProc * mLFILinuxProc {0};
   struct LFILinuxThread * mLFIMainThread {0};
+  struct LFIContext ** mLFIMainThreadCtx {0};
+
   struct LFIBox * mLFIBox {0};
   bool instance_initialized = false;
   uintptr_t heap_base = 0;
@@ -164,6 +166,10 @@ private:
   size_t return_slot_size = 0;
   T_PointerType return_slot = 0;
   static constexpr size_t mStackSize = 2 * 1024 * 1024;
+
+  RLBOX_SHARED_LOCK(mThreadContextMapLock);
+  // A map that maintains the context structure for each host thread that has invoked a sandbox function
+  std::map<uintptr_t, struct LFIContext *> mThreadContextMap;
 
   static constexpr size_t MAX_CALLBACKS = 128;
 
@@ -179,6 +185,38 @@ private:
   thread_local static inline rlbox_lfi_sandbox_thread_data thread_data{ 0, 0 };
 #endif
 
+  // we use the address of a thread_local variable as a cheap thread identifier
+  static inline uintptr_t get_cheap_thread_id() {
+#ifndef RLBOX_EMBEDDER_PROVIDES_TLS_STATIC_VARIABLES
+    return reinterpret_cast<uintptr_t>(&thread_data);
+#else
+    return  reinterpret_cast<uintptr_t>(get_rlbox_lfi_sandbox_thread_data());
+#endif
+  }
+
+  LFIContext** get_fresh_or_existing_thread_ctx() {
+    // Check if this thread has already been initialized and return that context if it exists
+    uintptr_t cheap_thread_id = get_cheap_thread_id();
+    {
+      RLBOX_ACQUIRE_SHARED_GUARD(lock, mThreadContextMapLock);
+      auto iter = mThreadContextMap.find(cheap_thread_id);
+      if (iter != mThreadContextMap.end()) {
+        // thread has already been initialized. Return that context
+        auto ret = &(iter->second);
+        return ret;
+      }
+    }
+
+    // Initializing this thread for the first time.
+    RLBOX_ACQUIRE_UNIQUE_GUARD(lock, mThreadContextMapLock);
+    const auto iter_and_status = mThreadContextMap.insert({ cheap_thread_id, nullptr });
+    auto iter = iter_and_status.first;
+    auto ret = &(iter->second);
+    // initialize the context
+    lfi_clone(mLFIBox, ret);
+    return ret;
+  }
+
 template<uint32_t N, typename T_Ret, typename... T_Args>
 static void callback_interceptor()
 {
@@ -193,7 +231,12 @@ static void callback_interceptor()
     func = reinterpret_cast<T_Func>(thread_data.sandbox->callback_info[N].callback);
   }
 
-  struct LFIContext ** curr_ctx = lfi_thread_ctxp(thread_data.sandbox->mLFIMainThread);
+
+#ifndef RLBOX_SINGLE_THREADED_INVOCATIONS
+    LFIContext** curr_ctx = thread_data.sandbox->get_fresh_or_existing_thread_ctx();
+#else
+    LFIContext** curr_ctx = thread_data.sandbox->mLFIMainThreadCtx;
+#endif
 
   invoke_callback_from_separate_stack(lfi_ctx_regs(*curr_ctx),
     thread_data.sandbox->heap_base,
@@ -235,7 +278,9 @@ protected:
         .boxsize = static_cast<size_t>(4) * 1024 * 1024 * 1024,
         .verbose = false,
         .stores_only = false,
-        .no_verify = false,
+        // we expect that verification is run at build time at this is an AOT use case.
+        // Verifying at runtime just adds unnecessary slow downs.
+        .no_verify = true,
         .allow_wx = false,
         .no_init_sigaltstack = false,
       },
@@ -277,6 +322,11 @@ protected:
     FALLIBLE_DYNAMIC_CHECK(
       infallible, lfi_thread_inited == 0, "LFI main thread init failed");
 
+    mLFIMainThreadCtx = lfi_thread_ctxp(mLFIMainThread);
+#ifndef RLBOX_SINGLE_THREADED_INVOCATIONS
+    mThreadContextMap[get_cheap_thread_id()] = *mLFIMainThreadCtx;
+#endif
+
     instance_initialized = true;
 
     heap_base = reinterpret_cast<uintptr_t>(impl_get_memory_location());
@@ -290,11 +340,6 @@ protected:
     FALLIBLE_DYNAMIC_CHECK(infallible,
                             (heap_base & heap_offset_mask) == 0,
                             "Sandbox heap not aligned to 4GB");
-
-    bool callback_inited = lfi_box_cbinit(mLFIBox);
-    FALLIBLE_DYNAMIC_CHECK(infallible,
-                        callback_inited,
-                        "LFI Callback init failed");
 
     return true;
   }
@@ -431,7 +476,11 @@ protected:
     auto on_exit =
       detail::make_scope_exit([&] { thread_data.sandbox = old_sandbox; });
 
-    struct LFIContext ** curr_ctx = lfi_thread_ctxp(mLFIMainThread);
+#ifndef RLBOX_SINGLE_THREADED_INVOCATIONS
+    LFIContext** curr_ctx = get_fresh_or_existing_thread_ctx();
+#else
+    LFIContext** curr_ctx = mLFIMainThreadCtx;
+#endif
 
     lfi_invoke_info = (struct LFIInvokeInfo) {
         .ctx = curr_ctx,
