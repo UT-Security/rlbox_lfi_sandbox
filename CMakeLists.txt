@@ -71,7 +71,8 @@ endif()
 include(FetchContent)
 
 FetchContent_Declare(rlbox
-  GIT_REPOSITORY https://github.com/PLSysSec/rlbox.git)
+  GIT_REPOSITORY https://github.com/PLSysSec/rlbox.git
+  GIT_TAG thread-test)
 FetchContent_GetProperties(rlbox)
 if(NOT rlbox_POPULATED)
   FetchContent_Populate(rlbox)
@@ -212,6 +213,7 @@ add_custom_command(OUTPUT "${GLUE_LIB_ELF}"
                             ${rlbox_SOURCE_DIR}/code/tests/rlbox_glue/lib/libtest.c
                             -L ${LFI_SYSROOT_PATH} -lboxrt
                    COMMENT "Building lfi sandboxed library")
+# TODO: Run lfi verify above
 
 configure_file(${GLUE_LIB_EMBED_SRC} ${GLUE_LIB_EMBED_DEST})
 
@@ -247,7 +249,32 @@ if(UNIX AND NOT (${CMAKE_SYSTEM_NAME} MATCHES "Darwin"))
 endif()
 catch_discover_tests(test_rlbox_glue)
 
+
+add_executable(test_rlbox_glue_threaded test/test_lfi_sandbox_glue_main.cpp
+                                        test/test_lfi_sandbox_glue_threaded.cpp
+                                        ${GLUE_LIB_EMBED_DEST}
+                                        )
+target_include_directories(test_rlbox_glue_threaded PUBLIC ${CMAKE_SOURCE_DIR}/include
+                                                    PUBLIC ${rlbox_SOURCE_DIR}/code/include
+                                                    PUBLIC ${rlbox_SOURCE_DIR}/code/tests/rlbox_glue
+                                                    PUBLIC ${rlbox_SOURCE_DIR}/code/tests/rlbox_glue/lib
+                                                    )
+# target_compile_options(test_rlbox_glue_threaded PUBLIC -fno-stack-protector)
+target_link_libraries(test_rlbox_glue_threaded Catch2::Catch2
+                                               ${CMAKE_THREAD_LIBS_INIT}
+                                               ${CMAKE_DL_LIBS}
+                                               liblfi
+)
+
+add_dependencies(test_rlbox_glue_threaded build-liblfi)
+
+if(UNIX AND NOT (${CMAKE_SYSTEM_NAME} MATCHES "Darwin"))
+  target_link_libraries(test_rlbox_glue_threaded rt)
+endif()
+catch_discover_tests(test_rlbox_glue_threaded)
+
 # Shortcuts ###################
 
 add_custom_target(check COMMAND ${CMAKE_CTEST_COMMAND} -V)
 add_dependencies(check test_rlbox_glue)
+add_dependencies(check test_rlbox_glue_threaded)
