@@ -175,7 +175,7 @@ private:
 
   mutable RLBOX_SHARED_LOCK(callback_mutex);
   // Info about registered callbacks
-  rlbox_lfi_callback_info callback_info[MAX_CALLBACKS]{0};
+  rlbox_lfi_callback_info callback_info[MAX_CALLBACKS]{};
   // Mapping between the "stub in the sandboxed library" that is invoked during
   // a callback and the host callback (This is an RLBox function that fixes ABI
   // before invoking the real host callback)
