@@ -710,7 +710,7 @@ static constexpr bool is_registerclass_second_reg_floating_v =
 
 template <unsigned int TIntRegsLeft, typename TRet>
 constexpr return_info_t classify_return() {
-  return_info_t ret{0};
+  return_info_t ret{};
 
   using NoVoid_TRet = std::conditional_t<std::is_void_v<TRet>, int, TRet>;
 
@@ -899,7 +899,10 @@ template <unsigned int I, unsigned int TotalParams, unsigned int IntRegParams,
           std::array<param_location_t, TotalParams> ParamDestinations>
 void push_param(LFIRegs *ctx, uintptr_t sbx_mem_start,
                 uintptr_t sbx_mem_end, uintptr_t stackloc,
-                uintptr_t stack_extradata_loc) {}
+                uintptr_t stack_extradata_loc) {
+    (void) ctx, (void) sbx_mem_start, (void) sbx_mem_end, (void) stackloc,
+    (void) stack_extradata_loc;
+}
 
 template <unsigned int I, unsigned int TotalParams, unsigned int IntRegParams,
           unsigned int FloatRegParams,
@@ -1103,6 +1106,8 @@ auto invoke_func_on_separate_stack_helper(LFIRegs *ctx,
                                           uintptr_t sbx_mem_end,
                                           TRet (*dummy)(TFormalParams...),
                                           TActualParams &&...args) {
+  (void) dummy;
+
   constexpr return_info_t ret_info =
       classify_return<int_regs_available, TRet>();
 
