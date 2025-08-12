@@ -325,6 +325,7 @@ protected:
     mLFIMainThreadCtx = lfi_thread_ctxp(mLFIMainThread);
 #ifndef RLBOX_SINGLE_THREADED_INVOCATIONS
     mThreadContextMap[get_cheap_thread_id()] = *mLFIMainThreadCtx;
+    lfi_linux_init_clone(mLFIMainThread);
 #endif
 
     instance_initialized = true;
