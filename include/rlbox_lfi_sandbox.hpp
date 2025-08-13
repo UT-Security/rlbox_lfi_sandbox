@@ -280,7 +280,11 @@ protected:
         .stores_only = false,
         // we expect that verification is run at build time at this is an AOT use case.
         // Verifying at runtime just adds unnecessary slow downs.
+#ifdef RLBOX_LFI_NO_VERIFY
         .no_verify = true,
+#else
+        .no_verify = false,
+#endif
         .allow_wx = false,
         .no_init_sigaltstack = false,
       },
