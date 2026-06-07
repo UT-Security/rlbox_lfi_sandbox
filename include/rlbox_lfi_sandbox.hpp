@@ -20,6 +20,7 @@
 #include <unistd.h>
 
 #include "lfi_arch.h"
+#include "lfi_core.h"
 #include "lfi_linux.h"
 
 #include "lfi_sepstack_invoker.hpp"
@@ -487,11 +488,7 @@ protected:
     LFIContext** curr_ctx = mLFIMainThreadCtx;
 #endif
 
-    lfi_invoke_info = (struct LFIInvokeInfo) {
-        .ctx = curr_ctx,
-        .targetfn = reinterpret_cast<uintptr_t>(func_ptr),
-        .box = mLFIBox,
-    };
+    lfi_set_invoke_info(curr_ctx, reinterpret_cast<uintptr_t>(func_ptr), mLFIBox);
 
     return invoke_func_on_separate_stack<T_Converted>(lfi_ctx_regs(*curr_ctx), heap_base, heap_base + heap_size, 0 /* stack loc already in regs */, std::forward<T_Args>(params)...);
   }
